@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' file: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;">
+    <title>이미지 뷰어</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div id="app">
+        <!-- 시작 화면 -->
+        <div id="start-screen">
+            <div class="start-content">
+                <div class="logo">
+                    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                </div>
+                <h1>이미지 뷰어</h1>
+                <p>폴더를 선택하거나 이미지를 드래그하여 시작하세요</p>
+                <div class="button-group">
+                    <button id="open-folder-btn" class="primary-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                        </svg>
+                        폴더 열기
+                    </button>
+                    <button id="open-file-btn" class="secondary-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                        파일 열기
+                    </button>
+                </div>
+                <div class="shortcuts-hint">
+                    <div class="shortcut-row">
+                        <kbd>Ctrl</kbd>+<kbd>O</kbd> 폴더 열기
+                        <span class="separator">|</span>
+                        <kbd>←</kbd><kbd>→</kbd> 이미지 이동
+                    </div>
+                    <div class="shortcut-row">
+                        <kbd>Insert</kbd> 복사
+                        <span class="separator">|</span>
+                        <kbd>Delete</kbd> 삭제
+                        <span class="separator">|</span>
+                        <kbd>F5</kbd> 설정
+                    </div>
+                </div>
+            </div>
+            <div class="start-window-controls">
+                <button class="window-ctrl-btn" onclick="window.api.windowMinimize()">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <rect y="5" width="12" height="2" fill="currentColor" />
+                    </svg>
+                </button>
+                <button class="window-ctrl-btn" onclick="window.api.windowMaximize()">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" />
+                    </svg>
+                </button>
+                <button class="window-ctrl-btn close" onclick="window.api.windowClose()">
+                    <svg width="12" height="12" viewBox="0 0 12 12">
+                        <path d="M1 1L11 11M1 11L11 1" stroke="currentColor" stroke-width="1.5" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- 이미지 뷰어 -->
+        <div id="viewer" class="hidden">
+            <div id="toolbar">
+                <div class="toolbar-left">
+                    <button id="toolbar-folder" class="toolbar-btn" title="폴더 열기 (Ctrl+O)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                        </svg>
+                    </button>
+                    <button id="toolbar-location" class="toolbar-btn" title="파일 위치 열기 (Ctrl+E)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="toolbar-center">
+                    <span id="toolbar-info"></span>
+                    <div class="progress-container">
+                        <div id="progress-bar" class="progress-bar"></div>
+                    </div>
+                </div>
+                <div class="toolbar-right">
+                    <div class="toolbar-status">
+                        <div id="badge-folder-nav" class="status-badge" title="폴더 이동 옵션 (Ctrl+R)">
+                            <span class="badge-icon">📁</span>
+                            <span class="badge-text">순차폴더</span>
+                        </div>
+                        <div id="badge-image-nav" class="status-badge" title="이미지 이동 옵션 (Ctrl+T)">
+                            <span class="badge-icon">🖼️</span>
+                            <span class="badge-text">순차이미지</span>
+                        </div>
+                    </div>
+                    <div class="toolbar-divider"></div>
+                    <button id="toolbar-settings" class="toolbar-btn" title="설정 (F5)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                        </svg>
+                    </button>
+                    <button id="toolbar-fullscreen" class="toolbar-btn" title="전체 화면 (F11)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="15 3 21 3 21 9" />
+                            <polyline points="9 21 3 21 3 15" />
+                            <line x1="21" y1="3" x2="14" y2="10" />
+                            <line x1="3" y1="21" x2="10" y2="14" />
+                        </svg>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button id="btn-minimize" class="toolbar-btn window-btn" title="최소화">
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <rect y="5" width="12" height="2" fill="currentColor" />
+                        </svg>
+                    </button>
+                    <button id="btn-maximize" class="toolbar-btn window-btn" title="최대화">
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor"
+                                stroke-width="1.5" />
+                        </svg>
+                    </button>
+                    <button id="btn-close" class="toolbar-btn window-btn close-btn" title="닫기">
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                            <path d="M1 1L11 11M1 11L11 1" stroke="currentColor" stroke-width="1.5" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div id="folder-notification" class="notification hidden">
+                <div class="notification-icon">📁</div>
+                <div class="notification-text">
+                    <span class="notification-label">폴더 이동</span>
+                    <span class="notification-folder"></span>
+                    <div class="notification-details">
+                        <div class="notification-detail">
+                            <span class="detail-icon">↔️</span>
+                            <span id="notification-direction" class="detail-value"></span>
+                        </div>
+                        <div class="notification-detail">
+                            <span class="detail-icon">🎲</span>
+                            <span id="notification-mode" class="detail-value"></span>
+                        </div>
+                        <div class="notification-detail">
+                            <span class="detail-icon">#️⃣</span>
+                            <span id="notification-count" class="detail-value"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="image-container" class="view-fit">
+                <img id="main-image" src="" alt="이미지" draggable="false">
+                <img id="second-image" src="" alt="두 번째 이미지" class="hidden" draggable="false">
+            </div>
+
+            <div id="info-panel" class="hidden">
+                <div class="info-row"><span class="info-label">폴더</span><span id="info-folder"
+                        class="info-value"></span></div>
+                <div class="info-row"><span class="info-label">파일</span><span id="info-filename"
+                        class="info-value"></span></div>
+                <div class="info-row"><span class="info-label">순서</span><span id="info-index" class="info-value"></span>
+                </div>
+                <div class="info-row"><span class="info-label">크기</span><span id="info-size" class="info-value"></span>
+                </div>
+                <div class="info-row"><span class="info-label">해상도</span><span id="info-resolution"
+                        class="info-value"></span></div>
+            </div>
+
+            <button id="prev-btn" class="nav-btn nav-prev hidden"></button>
+            <button id="next-btn" class="nav-btn nav-next hidden"></button>
+        </div>
+
+        <!-- 컨텍스트 메뉴 -->
+        <div id="context-menu" class="hidden">
+            <div class="menu-section">
+                <div class="menu-item" data-action="fitSmall"><span class="menu-check"></span><span class="menu-text">작은
+                        그림도 꽉차게 보기</span><span class="menu-shortcut">Z</span></div>
+                <div class="menu-item" data-action="original"><span class="menu-check"></span><span class="menu-text">원본
+                        크기(100%)로 보기</span><span class="menu-shortcut">0</span></div>
+                <div class="menu-item" data-action="fit"><span class="menu-check"></span><span class="menu-text">꽉차게
+                        보기</span><span class="menu-shortcut">9</span></div>
+                <div class="menu-item" data-action="fitWidth"><span class="menu-check"></span><span
+                        class="menu-text">꽉차게 보기(폭맞춤)</span><span class="menu-shortcut">8</span></div>
+                <div class="menu-item" data-action="dualLR"><span class="menu-check"></span><span class="menu-text">두장
+                        보기(왼→오)</span><span class="menu-shortcut">7</span></div>
+                <div class="menu-item" data-action="dualRL"><span class="menu-check"></span><span class="menu-text">두장
+                        보기(오→왼)</span><span class="menu-shortcut">6</span></div>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-section">
+                <div class="menu-item" data-action="copyImage"><span class="menu-check"></span><span
+                        class="menu-text">이미지 복사</span><span class="menu-shortcut">Insert</span></div>
+                <div class="menu-item" data-action="deleteItem"><span class="menu-check"></span><span
+                        class="menu-text">삭제</span><span class="menu-shortcut">Delete</span></div>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-section">
+                <div class="menu-item" data-action="toggleFolderNav"><span class="menu-check"></span><span
+                        class="menu-text">폴더 이동 옵션 전환</span><span class="menu-shortcut">Ctrl+R</span></div>
+                <div class="menu-item" data-action="toggleImageNav"><span class="menu-check"></span><span
+                        class="menu-text">이미지 이동 옵션 전환</span><span class="menu-shortcut">Ctrl+T</span></div>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-section">
+                <div class="menu-item" data-action="openFolder"><span class="menu-check"></span><span
+                        class="menu-text">폴더 열기</span><span class="menu-shortcut">Ctrl+O</span></div>
+                <div class="menu-item" data-action="openLocation"><span class="menu-check"></span><span
+                        class="menu-text">파일 위치 열기</span><span class="menu-shortcut">Ctrl+E</span></div>
+                <div class="menu-item" data-action="settings"><span class="menu-check"></span><span
+                        class="menu-text">설정...</span><span class="menu-shortcut">F5</span></div>
+            </div>
+        </div>
+
+        <!-- 설정 모달 -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>설정</h2>
+                    <button id="close-settings" class="close-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="settings-section">
+                        <h3>📁 폴더 이동 옵션 <kbd>Ctrl+R</kbd></h3>
+                        <p class="settings-desc">마지막/처음 이미지에서 다음/이전 버튼을 눌렀을 때</p>
+                        <div class="radio-group">
+                            <label class="radio-item"><input type="radio" name="folderNav" value="next"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">순차 폴더 이동</span><span
+                                        class="radio-desc">형제 폴더로 순차 이동</span></div>
+                            </label>
+                            <label class="radio-item"><input type="radio" name="folderNav" value="random"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">랜덤 폴더 이동</span><span
+                                        class="radio-desc">형제 폴더 중 무작위 선택</span></div>
+                            </label>
+                            <label class="radio-item"><input type="radio" name="folderNav" value="loop"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">폴더 이동 없음 (순환)</span><span
+                                        class="radio-desc">현재 폴더 내에서 처음/마지막으로 순환</span></div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>🖼️ 이미지 이동 옵션 <kbd>Ctrl+T</kbd></h3>
+                        <div class="radio-group">
+                            <label class="radio-item"><input type="radio" name="imageNav" value="sequential"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">순차 이미지 이동</span><span
+                                        class="radio-desc">파일명 순서대로 탐색</span></div>
+                            </label>
+                            <label class="radio-item"><input type="radio" name="imageNav" value="random"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">랜덤 이미지 이동</span><span
+                                        class="radio-desc">폴더 내 이미지를 무작위로 탐색</span></div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>🎲 랜덤 중복 방지</h3>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" id="prevent-duplicate-folder"><span
+                                    class="checkbox-custom"></span>
+                                <div class="checkbox-content"><span class="checkbox-label">랜덤 폴더 중복 방지</span><span
+                                        class="checkbox-desc">이미 방문한 폴더는 모두 방문 후 다시 표시</span></div>
+                            </label>
+                            <label class="checkbox-item"><input type="checkbox" id="prevent-duplicate-image"><span
+                                    class="checkbox-custom"></span>
+                                <div class="checkbox-content"><span class="checkbox-label">랜덤 이미지 중복 방지</span><span
+                                        class="checkbox-desc">이미 본 이미지는 모두 본 후 다시 표시</span></div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>👁️ 기본 보기 모드</h3>
+                        <div class="radio-group compact">
+                            <label class="radio-item"><input type="radio" name="viewMode" value="fit"><span
+                                    class="radio-custom"></span><span class="radio-label">꽉차게 보기</span></label>
+                            <label class="radio-item"><input type="radio" name="viewMode" value="fitSmall"><span
+                                    class="radio-custom"></span><span class="radio-label">작은 그림도 꽉차게</span></label>
+                            <label class="radio-item"><input type="radio" name="viewMode" value="original"><span
+                                    class="radio-custom"></span><span class="radio-label">원본 크기 (100%)</span></label>
+                            <label class="radio-item"><input type="radio" name="viewMode" value="fitWidth"><span
+                                    class="radio-custom"></span><span class="radio-label">폭맞춤</span></label>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>🗑️ 삭제 옵션 <kbd>Delete</kbd></h3>
+                        <div class="radio-group">
+                            <label class="radio-item"><input type="radio" name="deleteMode" value="image"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">이미지 삭제</span><span
+                                        class="radio-desc">현재 보고 있는 이미지만 삭제</span></div>
+                            </label>
+                            <label class="radio-item"><input type="radio" name="deleteMode" value="folder"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content"><span class="radio-label">폴더 삭제</span><span
+                                        class="radio-desc">현재 이미지가 있는 폴더 전체 삭제</span></div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>📋 이미지 복사 대상 폴더 <kbd>Insert</kbd></h3>
+                        <div class="copy-dest-container">
+                            <span id="copy-dest-path" class="copy-dest-path">다운로드 폴더</span>
+                            <button id="select-copy-dest" class="secondary-btn small">폴더 선택</button>
+                        </div>
+                    </div>
+                    <div class="settings-section">
+                        <h3>🖱️ 기타 옵션</h3>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" id="enable-image-drag"><span
+                                    class="checkbox-custom"></span>
+                                <div class="checkbox-content"><span class="checkbox-label">이미지 드래그 이동</span><span
+                                        class="checkbox-desc">이미지를 클릭하여 드래그로 위치 조정 (원본 크기 모드)</span></div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="cancel-settings" class="secondary-btn">취소</button>
+                    <button id="save-settings" class="primary-btn">저장</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 삭제 확인 모달 -->
+        <div id="delete-modal" class="modal hidden">
+            <div class="modal-backdrop" onclick="document.getElementById('cancel-delete').click()"></div>
+            <div class="modal-content delete-confirm-modal">
+                <div class="modal-header">
+                    <h2>🗑️ 삭제 확인</h2>
+                </div>
+                <div class="modal-body">
+                    <p class="delete-confirm-text">다음 <span id="delete-target-type">이미지</span>를 삭제하시겠습니까?</p>
+                    <p class="delete-target-name" id="delete-target-name"></p>
+                    <p class="delete-hint">삭제된 항목은 휴지통으로 이동됩니다.</p>
+                </div>
+                <div class="modal-footer">
+                    <button id="cancel-delete" class="secondary-btn">취소</button>
+                    <button id="confirm-delete-btn" class="danger-btn">삭제 (Enter)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+
+</html>
