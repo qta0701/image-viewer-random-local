@@ -674,10 +674,12 @@ body {
 .modal {
     position: fixed;
     inset: 0;
-    z-index: 3000;
+    z-index: 6000;
     display: flex;
     align-items: center;
     justify-content: center;
+    transform: translateZ(0);
+    will-change: opacity;
 }
 
 .modal-backdrop {
@@ -1097,6 +1099,7 @@ body.drag-over::after {
     border-radius: 2px;
     margin-left: 12px;
     overflow: hidden;
+    cursor: pointer;
 }
 
 .progress-bar {
@@ -1366,4 +1369,52 @@ body.drag-over::after {
 #context-menu,
 .modal {
     /* -webkit-app-region: no-drag; */
+}
+
+/* File Association Settings */
+.file-assoc-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+
+.file-assoc-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.grid-2-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.warning-text {
+    font-size: 11px;
+    color: var(--accent-color);
+    margin-top: 8px;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 8px 10px;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.checkbox-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.checkbox-item input {
+    margin-right: 8px;
 }

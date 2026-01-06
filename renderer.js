@@ -37,9 +37,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     let windowDragStartX = 0;
     let windowDragStartY = 0;
 
-    initEventListeners();
-    updateSettingsUI();
-    updateStatusBadges();
+    window.api.log('[Renderer] Script started.');
+
+    // 초기화 로직을 약간 지연시켜 렌더링 스레드 안정화 확보
+    setTimeout(() => {
+        window.api.log('[Renderer] Initializing event listeners...');
+        initEventListeners();
+        updateSettingsUI();
+        updateStatusBadges();
+        window.api.log('[Renderer] Initialization done.');
+
+        // [Startup Hack] 시작 시 렌더링 먹통 방지 (설정 모달 Flash)
+        setTimeout(() => {
+            const settingsModal = document.getElementById('settings-modal');
+            if (settingsModal) {
+                settingsModal.style.opacity = '0.01';
+                settingsModal.classList.remove('hidden');
+                setTimeout(() => {
+                    settingsModal.classList.add('hidden');
+                    settingsModal.style.opacity = '';
+                    // 포커스 강제
+                    const openBtn = document.getElementById('open-folder-btn');
+                    if (openBtn) openBtn.focus();
+                }, 50);
+            }
+        }, 200);
+    }, 100);
 
     function initEventListeners() {
         document.getElementById('open-folder-btn').addEventListener('click', () => window.api.openFolder());
@@ -67,10 +90,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (newPath) document.getElementById('copy-dest-path').textContent = newPath;
         });
 
-        document.getElementById('cancel-delete').addEventListener('click', closeDeleteModal);
+        document.getElementById('cancel-delete').addEventListener('click', () => {
+            closeDeleteModal();
+            closeSettings(); // 설정창도 같이 닫음
+        });
         document.getElementById('confirm-delete-btn').addEventListener('click', () => {
             window.api.executeDelete();
             closeDeleteModal();
+            closeSettings(); // 설정창도 같이 닫음
         });
 
         document.addEventListener('keydown', handleKeydown);
@@ -105,56 +132,69 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.api.onCopySuccess(handleCopySuccess);
         window.api.onConfirmDelete(handleConfirmDelete);
         window.api.onDeleteSuccess(handleDeleteSuccess);
+        window.api.onUnloadImage(() => {
+            window.api.log('[Renderer] processing unload-image... (Start)');
+
+            // 이미지 소스를 빈 데이터 URI로 확실하게 교체하여 파일 핸들 해제 유도
+            const emptyImage = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+            mainImage.src = emptyImage;
+            secondImage.src = emptyImage;
+            currentImageData = null;
+
+            window.api.log('[Renderer] image src reset done. Waiting 100ms...');
+
+            // 약간의 지연을 주어 브라우저가 이미지 핸들을 놓게 함
+            setTimeout(() => {
+                window.api.log('[Renderer] 100ms timeout passed. Sending signal (Batch 1).');
+                window.api.imageUnloaded();
+                setTimeout(() => {
+                    window.api.log('[Renderer] Sending signal (Batch 2).');
+                    window.api.imageUnloaded();
+                }, 200);
+            }, 100);
+        });
         window.api.onNoMoreFolders(handleNoMoreFolders);
+
+        document.addEventListener('wheel', handleWheel, { passive: false });
+        const progressContainer = document.querySelector('.progress-container');
+        if (progressContainer) {
+            progressContainer.addEventListener('mousedown', (e) => e.stopPropagation()); // 드래그 방지
+            progressContainer.addEventListener('click', handleProgressBarClick);
+        }
     }
 
     // 마우스 다운 핸들러 (창 이동 또는 이미지 이동 시작)
     function handleMouseDown(e) {
         // 인터랙티브 요소는 무시
-        if (e.target.closest('button, input, .no-drag, .modal, .menu-item, .status-badge')) return;
+        if (e.target.closest('button, input, .no-drag, .modal, .menu-item, .status-badge, .progress-container')) return;
         if (e.target.closest('#settings-modal') || e.target.closest('#delete-modal')) return; // 모달 내부 클릭 무시
 
         // 우클릭은 무시
         if (e.button !== 0) return;
 
-        // 이미지 드래그 조건 체크 (설정 켜짐 + 이미지 있음 + 원본 모드 등)
-        // 여기서는 간단히 'enableImageDrag' 설정이 켜져있고 이미지 컨테이너 내부 클릭이면 이미지 드래그 시도
         const isImageClick = e.target === mainImage || e.target === secondImage || e.target === imageContainer;
 
         if (settings.enableImageDrag && isImageClick && currentImageData) {
             isDragging = true;
             dragStartX = e.clientX;
             dragStartY = e.clientY;
-
-            // 현재 이미지 transform 값 파싱 필요하지만, 여기서는 간단히 오프셋만
-            // 실제 이미지 이동 구현은 복잡하므로, 사용자가 '드래그로 뷰어 이동'을 원했으니 창 이동 우선?
-            // "이미지가 열린화면에서는, 드래그로 뷰어 이동이 가능하게 해주고" -> 이미지 이동? 뷰어(창) 이동?
-            // 문맥상 "뷰어 이동"은 "다음 이미지로 이동"이 아니라 "패닝(Panning)"일 수도 있고 "창 이동"일 수도 있음.
-            // "시작화면에서는 창 이동이 아예 안돼" -> 창 이동을 원함.
-            // "앱 전체 화면에서 드래그 앤 드롭과 마우스 드래그로 창이동이 가능하게 해줘" -> 창 이동이 핵심.
-            // 따라서 이미지 드래그(패닝)보다 창 이동을 우선하거나, 패닝이 필요 없는 상황엔 창 이동을 해야 함.
-
-            // 지금은 '이미지 드래그 이동' 옵션이 켜져있으면 이미지 패닝을 우선하고, 아니면 창 이동을 하는 것으로.
-            // 단, fit 모드라서 이미지가 화면에 꽉 차있으면 패닝이 필요 없음 -> 창 이동.
-            // 일단 창 이동을 기본으로 하고, 특정 요소(확대된 이미지) 위에서만 패닝하도록 구현하는 것이 좋음.
-            // 사용자의 "드래그로 뷰어 이동"은 "창 이동"을 의미할 확률이 90%.
-
-            // 따라서 isWindowDragging을 우선.
+        } else {
+            isWindowDragging = true;
+            window.api.windowDragStart();
         }
-
-        isWindowDragging = true;
-        windowDragStartX = e.clientX;
-        windowDragStartY = e.clientY;
     }
 
     function handleMouseMove(e) {
         if (isWindowDragging) {
-            window.api.windowMove({ mouseX: windowDragStartX, mouseY: windowDragStartY });
+            window.api.windowMove();
         }
     }
 
     function handleMouseUp() {
-        isWindowDragging = false;
+        if (isWindowDragging) {
+            isWindowDragging = false;
+            window.api.windowDragEnd();
+        }
         isDragging = false;
     }
 
@@ -180,10 +220,31 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (isFullscreen) window.api.exitFullscreen();
                 else window.api.windowClose();
                 break;
+            case 'ArrowUp':
+                e.preventDefault();
+                if (currentImageData && currentImageData.index === 0) {
+                    showBoundaryNotification('첫 번째 이미지입니다', '');
+                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('first');
+                } else {
+                    if (settings.keyboardAction === 'firstLast') window.api.goToFirstImage();
+                    else window.api.navigateImage(-1);
+                }
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                if (isAtLastImage()) {
+                    showBoundaryNotification('마지막 이미지입니다', '');
+                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('last');
+                } else {
+                    if (settings.keyboardAction === 'firstLast') window.api.goToLastImage();
+                    else window.api.navigateImage(1);
+                }
+                break;
             case 'ArrowLeft':
                 e.preventDefault();
                 if (currentImageData && currentImageData.index === 0) {
-                    handleHomeEnd('first');
+                    showBoundaryNotification('첫 번째 이미지입니다', '');
+                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('first');
                 } else {
                     clearBoundaryState();
                     window.api.navigateImage(-1);
@@ -191,8 +252,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'ArrowRight':
                 e.preventDefault();
-                if (currentImageData && currentImageData.index >= (currentImageData.total || 0) - 1) {
-                    handleHomeEnd('last');
+                if (isAtLastImage()) {
+                    showBoundaryNotification('마지막 이미지입니다', '');
+                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('last');
                 } else {
                     clearBoundaryState();
                     window.api.navigateImage(1);
@@ -232,6 +294,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'Delete':
                 e.preventDefault();
+                window.api.log('[Renderer] Delete key pressed');
                 window.api.requestDelete();
                 break;
             case 'z':
@@ -262,17 +325,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Home/End 처리 (두번 누르면 폴더 이동)
+    // Home/End 처리 (즉시 이동)
     function handleHomeEnd(type) {
-        const now = Date.now();
-        if (lastBoundaryType === type && now - lastBoundaryTime < 2000) {
-            // 2초 이내에 같은 키 두번 누름 -> 폴더 이동
-            window.api.navigateFromBoundary(type);
-            clearBoundaryState();
+        clearBoundaryState();
+        if (type === 'first') {
+            if (currentImageData && currentImageData.index === 0) {
+                window.api.navigateFromBoundary('first');
+            } else {
+                window.api.goToFirstImage();
+            }
         } else {
-            lastBoundaryType = type;
-            lastBoundaryTime = now;
-            if (type === 'first') window.api.goToFirstImage();
-            else window.api.goToLastImage();
+            if (isAtLastImage()) {
+                window.api.navigateFromBoundary('last');
+            } else {
+                window.api.goToLastImage();
+            }
+        }
+    }
+
+    // 마지막 이미지인지 확인 (듀얼 모드 고려)
+    function isAtLastImage() {
+        if (!currentImageData) return false;
+        const total = currentImageData.total || 0;
+        if (total === 0) return false;
+
+        const index = currentImageData.index;
+        const isDualMode = settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL';
+
+        // 듀얼모드에서는 마지막 인덱스-1 (짝수 장수일 때 등)도 마지막 화면에 포함될 수 있음
+        // main.js의 로직과 일치시킴: (isDualMode && currentIndex >= lastIndex - 1)
+        if (isDualMode) {
+            return index >= total - 2;
+        } else {
+            return index >= total - 1;
         }
     }
 
@@ -287,30 +372,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 창 드래그 이동
-    function handleWindowDragStart(e) {
-        // 버튼이나 입력 요소 클릭은 무시
-        if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.toolbar-status')) return;
-        if (e.button !== 0) return;
 
-        isWindowDragging = true;
-        windowDragStartX = e.screenX;
-        windowDragStartY = e.screenY;
-        e.preventDefault();
-    }
-
-    function handleWindowDragMove(e) {
-        if (!isWindowDragging) return;
-
-        const deltaX = e.screenX - windowDragStartX;
-        const deltaY = e.screenY - windowDragStartY;
-
-        // Electron은 창 이동을 직접 처리할 수 없어서 CSS로 시각적 피드백
-        // 실제 창 이동은 -webkit-app-region: drag 사용
-    }
-
-    function handleWindowDragEnd() {
-        isWindowDragging = false;
-    }
 
     function resetImagePosition() {
         imageOffsetX = 0;
@@ -461,10 +523,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function handleConfirmDelete(data) {
+        window.api.log(`[Renderer] handleConfirmDelete called. Type: ${data.targetType}, Name: ${data.targetName}`);
         deleteConfirmData = data;
         document.getElementById('delete-target-type').textContent = data.targetType;
         document.getElementById('delete-target-name').textContent = data.targetName;
-        deleteModal.classList.remove('hidden');
+
+        // 화면 갱신 강제 (setTimeout으로 이벤트 루프 양보)
+        setTimeout(() => {
+            // [IPC Hack] 메인 프로세스와 핑퐁하여 파이프 뚫기
+            window.api.pingRender();
+
+            // [사용자 요청] 삭제 팝업 호출 시 설정 팝업도 같이 띄움 (화면 갱신용)
+            settingsModal.style.opacity = '1';
+            settingsModal.classList.remove('hidden');
+
+            deleteModal.style.zIndex = '7000'; // 설정보다 위
+            deleteModal.style.display = 'flex';
+            deleteModal.classList.remove('hidden');
+            window.api.log('[Renderer] Delete modal displayed with Settings.');
+
+            // 포커스 강제 이동으로 렌더링 유도
+            document.getElementById('cancel-delete').focus();
+
+            // 강제 리페인트 루프 체크 로그
+            let count = 0;
+            const interval = setInterval(() => {
+                deleteModal.style.transform = count % 2 === 0 ? 'translateZ(0) scale(1)' : 'translateZ(0) scale(1.0001)';
+                count++;
+                if (count > 5) clearInterval(interval);
+            }, 50);
+        }, 10);
     }
 
     function handleDeleteSuccess(data) {
@@ -480,6 +568,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function closeDeleteModal() {
         deleteModal.classList.add('hidden');
+        setTimeout(() => deleteModal.style.display = '', 300); // 애니메이션 후 초기화
         deleteConfirmData = null;
     }
 
@@ -581,6 +670,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function openSettings() {
+        window.api.log('[Renderer] openSettings called (F5).');
         updateSettingsUI();
         settingsModal.classList.remove('hidden');
     }
@@ -613,6 +703,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const copyDestPath = document.getElementById('copy-dest-path');
         if (copyDestPath && settings.copyDestination) copyDestPath.textContent = settings.copyDestination;
+
+        const wheelNavRadio = document.querySelector(`input[name="wheelAction"][value="${settings.wheelAction || 'prevNext'}"]`);
+        if (wheelNavRadio) wheelNavRadio.checked = true;
+
+        const keyboardNavRadio = document.querySelector(`input[name="keyboardAction"][value="${settings.keyboardAction || 'prevNext'}"]`);
+        if (keyboardNavRadio) keyboardNavRadio.checked = true;
     }
 
     async function saveSettings() {
@@ -624,6 +720,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const imageDragEl = document.getElementById('enable-image-drag');
             const preventDupFolderEl = document.getElementById('prevent-duplicate-folder');
             const preventDupImageEl = document.getElementById('prevent-duplicate-image');
+            const wheelActionEl = document.querySelector('input[name="wheelAction"]:checked');
+            const keyboardActionEl = document.querySelector('input[name="keyboardAction"]:checked');
 
             const newSettings = {
                 folderNavigation: folderNavEl ? folderNavEl.value : settings.folderNavigation,
@@ -632,10 +730,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 enableImageDrag: imageDragEl ? imageDragEl.checked : settings.enableImageDrag,
                 deleteMode: deleteModeEl ? deleteModeEl.value : settings.deleteMode,
                 preventDuplicateFolder: preventDupFolderEl ? preventDupFolderEl.checked : true,
-                preventDuplicateImage: preventDupImageEl ? preventDupImageEl.checked : true
+                preventDuplicateImage: preventDupImageEl ? preventDupImageEl.checked : true,
+                wheelAction: wheelActionEl ? wheelActionEl.value : 'prevNext',
+                keyboardAction: keyboardActionEl ? keyboardActionEl.value : 'prevNext'
             };
 
             settings = await window.api.saveSettings(newSettings);
+
+            updateStatusBadges();
+            closeSettings();
+            showModeNotification('설정이 저장되었습니다', '✅');
             updateStatusBadges();
             closeSettings();
             showModeNotification('설정이 저장되었습니다', '✅');
@@ -643,6 +747,34 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.error('설정 저장 오류:', error);
             showError('설정 저장에 실패했습니다.');
         }
+    }
+
+    function handleWheel(e) {
+        if (e.ctrlKey) return;
+
+        // 뷰어 영역이나 body에서 발생한 휠만 처리 (설정 모달 등 제외)
+        if (e.target.closest('.modal')) return;
+
+        e.preventDefault();
+
+        if (e.deltaY < 0) {
+            // 위로 굴림
+            if (settings.wheelAction === 'firstLast') window.api.goToFirstImage();
+            else window.api.navigateImage(-1);
+        } else if (e.deltaY > 0) {
+            // 아래로 굴림
+            if (settings.wheelAction === 'firstLast') window.api.goToLastImage();
+            else window.api.navigateImage(1);
+        }
+    }
+
+    function handleProgressBarClick(e) {
+        if (!currentImageData || !currentImageData.total) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const ratio = Math.max(0, Math.min(1, x / rect.width));
+        const index = Math.floor(ratio * currentImageData.total);
+        window.api.goToImage(index);
     }
 
     function showError(message) {

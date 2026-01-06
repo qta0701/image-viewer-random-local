@@ -1,11 +1,11 @@
 {
   "name": "image-viewer",
-  "version": "1.0.5",
+  "version": "1.1.35",
   "description": "랜덤 기능을 지원하는 고급 이미지 뷰어",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win",
+    "build": "node build/increment-version.js && electron-builder --win",
     "build:portable": "electron-builder --win portable"
   },
   "author": "Image Viewer",
@@ -36,8 +36,27 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "이미지 뷰어"
+      "shortcutName": "이미지 뷰어",
+      "include": "build/installer.nsh"
     },
+    "fileAssociations": [
+      {
+        "ext": [
+          "jpg",
+          "jpeg",
+          "png",
+          "webp",
+          "gif",
+          "bmp",
+          "ico",
+          "svg",
+          "avif"
+        ],
+        "name": "Image",
+        "role": "Viewer",
+        "icon": "assets/icon.png"
+      }
+    ],
     "files": [
       "**/*",
       "!dist/**"
