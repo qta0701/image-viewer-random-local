@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('api', {
 
     setViewMode: (mode) => ipcRenderer.send('set-view-mode', mode),
 
-    toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
+    toggleFullscreen: (mode) => ipcRenderer.send('toggle-fullscreen', mode),
     exitFullscreen: () => ipcRenderer.send('exit-fullscreen'),
     getFullscreenState: () => ipcRenderer.invoke('get-fullscreen-state'),
 
@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('api', {
     requestDelete: () => ipcRenderer.send('request-delete'),
     executeDelete: () => ipcRenderer.send('execute-delete'),
     selectCopyDestination: () => ipcRenderer.invoke('select-copy-destination'),
+    selectScreenshotDestination: () => ipcRenderer.invoke('select-screenshot-destination'),
+    copyCombinedImage: (dataUrl) => ipcRenderer.invoke('copy-combined-image', { dataUrl }),
 
     windowMinimize: () => ipcRenderer.send('window-minimize'),
     windowMaximize: () => ipcRenderer.send('window-maximize'),
@@ -45,8 +47,9 @@ contextBridge.exposeInMainWorld('api', {
     onSettingChanged: (callback) => ipcRenderer.on('setting-changed', (event, data) => callback(data)),
     onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', (event, settings) => callback(settings)),
     onBoundaryReached: (callback) => ipcRenderer.on('boundary-reached', (event, data) => callback(data)),
-    onFullscreenChanged: (callback) => ipcRenderer.on('fullscreen-changed', (event, isFullscreen) => callback(isFullscreen)),
+    onFullscreenChanged: (callback) => ipcRenderer.on('fullscreen-changed', (event, isFullscreen, mode) => callback(isFullscreen, mode)),
     onOpenSettings: (callback) => ipcRenderer.on('open-settings', () => callback()),
+    onFullscreenKeyF10: (callback) => ipcRenderer.on('fullscreen-key-f10', () => callback()),
     onError: (callback) => ipcRenderer.on('error', (event, message) => callback(message)),
     pingRender: () => ipcRenderer.send('ping-render'),
     onPongRender: (callback) => ipcRenderer.on('pong-render', () => callback()),
@@ -56,6 +59,10 @@ contextBridge.exposeInMainWorld('api', {
     onUnloadImage: (callback) => ipcRenderer.on('unload-image', () => callback()),
     onNoMoreFolders: (callback) => ipcRenderer.on('no-more-folders', () => callback()),
     log: (message) => ipcRenderer.send('log-message', message),
+
+    takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+    onMediaKey: (callback) => ipcRenderer.on('media-key', (event, key) => callback(key)),
+    onTriggerScreenshot: (callback) => ipcRenderer.on('trigger-screenshot', () => callback()),
 
     removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
 });

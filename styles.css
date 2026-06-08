@@ -287,6 +287,7 @@ body {
     padding: 0;
     position: relative;
     cursor: grab;
+    transition: margin var(--transition-normal), height var(--transition-normal);
 }
 
 #image-container:active {
@@ -294,7 +295,9 @@ body {
 }
 
 #image-container.dual-view {
-    gap: 4px;
+    gap: 8px;
+    width: 100%;
+    height: 100%;
 }
 
 #main-image,
@@ -307,7 +310,11 @@ body {
 
 #image-container.dual-view #main-image,
 #image-container.dual-view #second-image {
-    max-width: calc(50% - 2px);
+    max-width: calc(50% - 4px);
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
 }
 
 /* View modes */
@@ -318,11 +325,32 @@ body {
     object-fit: contain;
 }
 
-#image-container.view-fitSmall #main-image,
-#image-container.view-fitSmall #second-image {
+#image-container.view-fit.fit-small #main-image,
+#image-container.view-fit.fit-small #second-image {
     width: 100%;
     height: 100%;
     object-fit: contain;
+}
+
+#image-container.dual-view.fit-small #main-image,
+#image-container.dual-view.fit-small #second-image {
+    width: calc(50% - 4px) !important;
+    height: 100% !important;
+    object-fit: contain;
+}
+
+#image-container.view-dualLR.fit-small #main-image {
+    object-position: right center !important;
+}
+#image-container.view-dualLR.fit-small #second-image {
+    object-position: left center !important;
+}
+
+#image-container.view-dualRL.fit-small #main-image {
+    object-position: left center !important;
+}
+#image-container.view-dualRL.fit-small #second-image {
+    object-position: right center !important;
 }
 
 #image-container.view-original #main-image,
@@ -1417,4 +1445,91 @@ body.drag-over::after {
 
 .checkbox-item input {
     margin-right: 8px;
+}
+
+/* ===========================
+   Fullscreen Mode Configurations
+   =========================== */
+
+/* 일반 전체화면 (F11): 툴바 보임, 이미지는 툴바 아래 꽉 참 */
+body.fullscreen-normal #toolbar {
+    display: flex !important;
+}
+
+body.fullscreen-normal #image-container {
+    margin-top: 50px !important;
+    height: calc(100% - 50px) !important;
+}
+
+/* 완전 전체화면 (Ctrl+F11): 툴바 안 보임, 이미지가 창 전체에 꽉 참 */
+body.fullscreen-complete #toolbar {
+    display: none !important;
+}
+
+body.fullscreen-complete #image-container {
+    margin-top: 0 !important;
+    height: 100% !important;
+}
+
+/* 스크린샷 캡처용 임시 툴바 숨김 규칙 */
+body.screenshot-temp-complete #toolbar {
+    display: none !important;
+}
+
+body.screenshot-temp-complete #image-container {
+    margin-top: 0 !important;
+    height: 100% !important;
+}
+
+/* ===========================
+   App Info & Changelog (Start Screen)
+   =========================== */
+.app-info-container {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--glass-border);
+    text-align: left;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.app-version {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-secondary);
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.app-changelog h3 {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.app-changelog ul {
+    list-style: none;
+    padding-left: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+}
+
+.app-changelog li {
+    position: relative;
+    padding-left: 12px;
+    line-height: 1.4;
+}
+
+.app-changelog li::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--accent-primary);
 }

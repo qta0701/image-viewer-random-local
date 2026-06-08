@@ -60,19 +60,33 @@
                         <kbd>F5</kbd> 설정
                     </div>
                 </div>
+                <div class="app-info-container">
+                    <div class="app-version">Version <span id="app-version-text">1.1.36</span></div>
+                    <div class="app-changelog">
+                        <h3>최근 업데이트 내역</h3>
+                        <ul>
+                            <li>창 X 버튼 닫기 버그 해결</li>
+                            <li>창 드래그 시 크기가 점점 커지는 현상 수정</li>
+                            <li>전체화면(F11) ↔ 완전 전체화면(Ctrl+F11) 즉시 전환</li>
+                            <li>이미지 줌(Ctrl++/-, 배율 알림) 및 드래그 보완</li>
+                            <li>상단 타이틀바 폴더명 표기 및 undefined 오류 해결</li>
+                            <li>두장보기 모드 작은 그림도 꽉차게 토글 및 줌 호환</li>
+                        </ul>
+                    </div>
+                </div>
             </div>
             <div class="start-window-controls">
-                <button class="window-ctrl-btn" onclick="window.api.windowMinimize()">
+                <button id="start-btn-minimize" class="window-ctrl-btn">
                     <svg width="12" height="12" viewBox="0 0 12 12">
                         <rect y="5" width="12" height="2" fill="currentColor" />
                     </svg>
                 </button>
-                <button class="window-ctrl-btn" onclick="window.api.windowMaximize()">
+                <button id="start-btn-maximize" class="window-ctrl-btn">
                     <svg width="12" height="12" viewBox="0 0 12 12">
                         <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" />
                     </svg>
                 </button>
-                <button class="window-ctrl-btn close" onclick="window.api.windowClose()">
+                <button id="start-btn-close" class="window-ctrl-btn close">
                     <svg width="12" height="12" viewBox="0 0 12 12">
                         <path d="M1 1L11 11M1 11L11 1" stroke="currentColor" stroke-width="1.5" />
                     </svg>
@@ -310,8 +324,6 @@
                         <div class="radio-group compact">
                             <label class="radio-item"><input type="radio" name="viewMode" value="fit"><span
                                     class="radio-custom"></span><span class="radio-label">꽉차게 보기</span></label>
-                            <label class="radio-item"><input type="radio" name="viewMode" value="fitSmall"><span
-                                    class="radio-custom"></span><span class="radio-label">작은 그림도 꽉차게</span></label>
                             <label class="radio-item"><input type="radio" name="viewMode" value="original"><span
                                     class="radio-custom"></span><span class="radio-label">원본 크기 (100%)</span></label>
                             <label class="radio-item"><input type="radio" name="viewMode" value="fitWidth"><span
@@ -341,12 +353,24 @@
                         </div>
                     </div>
                     <div class="settings-section">
+                        <h3>📸 스크린샷 저장 폴더 <kbd>PrintScreen</kbd></h3>
+                        <div class="copy-dest-container">
+                            <span id="screenshot-dest-path" class="copy-dest-path">다운로드 폴더</span>
+                            <button id="select-screenshot-dest" class="secondary-btn small">폴더 선택</button>
+                        </div>
+                    </div>
+                    <div class="settings-section">
                         <h3>🖱️ 기타 옵션</h3>
                         <div class="checkbox-group">
                             <label class="checkbox-item"><input type="checkbox" id="enable-image-drag"><span
                                     class="checkbox-custom"></span>
                                 <div class="checkbox-content"><span class="checkbox-label">이미지 드래그 이동</span><span
                                         class="checkbox-desc">이미지를 클릭하여 드래그로 위치 조정 (원본 크기 모드)</span></div>
+                            </label>
+                            <label class="checkbox-item"><input type="checkbox" id="enable-fit-small"><span
+                                    class="checkbox-custom"></span>
+                                <div class="checkbox-content"><span class="checkbox-label">작은 그림도 꽉차게 보기 (Z)</span><span
+                                        class="checkbox-desc">작은 이미지도 화면/분할 크기에 맞춰 꽉 차게 확대합니다.</span></div>
                             </label>
                         </div>
                     </div>

@@ -41,18 +41,23 @@ function loadSettings() {
     try {
         if (fs.existsSync(savedPath)) {
             settings = JSON.parse(fs.readFileSync(savedPath, 'utf8'));
+            if (settings.screenshotDestination === undefined) {
+                settings.screenshotDestination = '';
+            }
             log('Settings loaded successfully');
         } else {
             // 기본 설정
             settings = {
                 folderNavigation: 'random', // 'random', 'sequential'
                 imageNavigation: 'random', // 'random', 'sequential'
-                viewMode: 'fitSmall', // 'original', 'fit', 'fitWidth', 'fitSmall', 'dualLR', 'dualRL'
+                viewMode: 'fit', // 'original', 'fit', 'fitWidth', 'dualLR', 'dualRL'
+                fitSmall: true,
                 enableImageDrag: true,
                 deleteMode: 'folder', // 'folder', 'image'
                 preventDuplicateFolder: true,
                 preventDuplicateImage: true,
                 copyDestination: '',
+                screenshotDestination: '',
                 wheelAction: 'prevNext', // 'prevNext', 'firstLast'
                 keyboardAction: 'prevNext', // 'prevNext', 'firstLast'
             };
@@ -123,6 +128,37 @@ function createWindow() {
 
     mainWindow.loadFile('index.html');
 
+    // 키보드 이벤트 우회 가로채기 (타 프로그램 핫키 우선권 대응)
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+        const key = input.key;
+        
+        // PrintScreen/Snapshot 키는 keyDown이 차단될 수 있으므로, keyUp 또는 keyDown 시점에 모두 낚아채서 1회만 스크린샷 트리거
+        if (key === 'PrintScreen' || key === 'Snapshot') {
+            event.preventDefault();
+            if (input.type === 'keyUp') {
+                log('PrintScreen / Snapshot pressed (before-input-event keyUp)');
+                mainWindow.webContents.send('trigger-screenshot');
+            }
+            return;
+        }
+
+        if (input.type === 'keyDown') {
+            if (key === 'F10') {
+                event.preventDefault();
+                log('F10 pressed (before-input-event)');
+                mainWindow.webContents.send('fullscreen-key-f10');
+            } else if (key === 'MediaNextTrack') {
+                event.preventDefault();
+                log('MediaNextTrack pressed (before-input-event)');
+                mainWindow.webContents.send('media-key', 'next');
+            } else if (key === 'MediaPreviousTrack') {
+                event.preventDefault();
+                log('MediaPreviousTrack pressed (before-input-event)');
+                mainWindow.webContents.send('media-key', 'prev');
+            }
+        }
+    });
+
     // 개발자 도구 (필요시 주석 해제)
     // mainWindow.webContents.openDevTools();
 
@@ -131,6 +167,13 @@ function createWindow() {
             settings.bounds = mainWindow.getBounds();
             saveSettings(settings);
         }
+    });
+
+    mainWindow.on('focus', () => {
+        registerMediaShortcuts();
+    });
+    mainWindow.on('blur', () => {
+        unregisterMediaShortcuts();
     });
 }
 
@@ -172,6 +215,10 @@ app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+});
+
 // ---------------- IPC 통신 ----------------
 
 ipcMain.handle('get-settings', () => settings);
@@ -188,34 +235,42 @@ ipcMain.on('window-maximize', () => {
 ipcMain.on('window-close', () => {
     app.quit();
 });
-ipcMain.on('toggle-fullscreen', () => {
+ipcMain.on('toggle-fullscreen', (event, mode) => {
     const isFullScreen = mainWindow.isFullScreen();
     mainWindow.setFullScreen(!isFullScreen);
-    mainWindow.webContents.send('fullscreen-changed', !isFullScreen);
+    mainWindow.webContents.send('fullscreen-changed', !isFullScreen, mode);
 });
 
 ipcMain.on('exit-fullscreen', () => {
     if (mainWindow.isFullScreen()) {
         mainWindow.setFullScreen(false);
-        mainWindow.webContents.send('fullscreen-changed', false);
+        mainWindow.webContents.send('fullscreen-changed', false, null);
     }
 });
 
 // 창 드래그 이동
 let dragOffset = null;
+let dragWindowSize = null;
 ipcMain.on('window-drag-start', () => {
     const pos = screen.getCursorScreenPoint();
     const bounds = mainWindow.getBounds();
     dragOffset = { x: pos.x - bounds.x, y: pos.y - bounds.y };
+    dragWindowSize = { width: bounds.width, height: bounds.height };
 });
 ipcMain.on('window-move', () => {
-    if (dragOffset) {
+    if (dragOffset && dragWindowSize) {
         const pos = screen.getCursorScreenPoint();
-        mainWindow.setPosition(pos.x - dragOffset.x, pos.y - dragOffset.y);
+        mainWindow.setBounds({
+            x: pos.x - dragOffset.x,
+            y: pos.y - dragOffset.y,
+            width: dragWindowSize.width,
+            height: dragWindowSize.height
+        });
     }
 });
 ipcMain.on('window-drag-end', () => {
     dragOffset = null;
+    dragWindowSize = null;
 });
 
 // 경계에서 폴더 이동
@@ -377,6 +432,58 @@ ipcMain.handle('select-copy-destination', async () => {
     return null;
 });
 
+ipcMain.handle('select-screenshot-destination', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory']
+    });
+    if (!result.canceled && result.filePaths.length > 0) {
+        settings.screenshotDestination = result.filePaths[0];
+        saveSettings(settings);
+        return settings.screenshotDestination;
+    }
+    return null;
+});
+
+ipcMain.handle('copy-combined-image', async (event, { dataUrl }) => {
+    if (!settings.copyDestination) {
+        mainWindow.webContents.send('error', '복사 대상 저장 경로가 설정되지 않았습니다.');
+        return false;
+    }
+    
+    if (!fs.existsSync(settings.copyDestination)) {
+        try {
+            fs.mkdirSync(settings.copyDestination, { recursive: true });
+        } catch (err) {
+            mainWindow.webContents.send('error', '저장 경로를 생성할 수 없습니다.');
+            return false;
+        }
+    }
+    
+    try {
+        const base64Data = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
+        const buffer = Buffer.from(base64Data, 'base64');
+        
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = (now.getMonth() + 1).toString().padStart(2, '0');
+        const date = now.getDate().toString().padStart(2, '0');
+        const hours = now.getHours().toString().padStart(2, '0');
+        const minutes = now.getMinutes().toString().padStart(2, '0');
+        const seconds = now.getSeconds().toString().padStart(2, '0');
+        const combinedFileName = `${year}-${month}-${date} ${hours} ${minutes} ${seconds}.png`;
+        const destPath = path.join(settings.copyDestination, combinedFileName);
+        
+        fs.writeFileSync(destPath, buffer);
+        log(`Combined image copied successfully to: ${destPath}`);
+        mainWindow.webContents.send('copy-success', { fileName: combinedFileName });
+        return true;
+    } catch (err) {
+        log(`Failed to copy combined image: ${err.message}`);
+        mainWindow.webContents.send('error', '합성 이미지 복사 실패: ' + err.message);
+        return false;
+    }
+});
+
 // 뷰 모드 변경
 ipcMain.on('set-view-mode', (event, mode) => {
     settings.viewMode = mode;
@@ -483,6 +590,7 @@ function sendImageData() {
         path: imagePath,
         secondPath: secondImagePath,
         name: currentImages[currentIndex],
+        secondName: secondImagePath ? path.basename(secondImagePath) : null,
         index: currentIndex,
         total: currentImages.length,
         folderName: path.basename(currentFolder),
@@ -851,3 +959,56 @@ function onImageDeleteSuccess(imageName, index) {
         sendImageData();
     }
 }
+
+function registerMediaShortcuts() {
+    try {
+        globalShortcut.register('MediaNextTrack', () => {
+            log('Global MediaNextTrack pressed');
+            if (mainWindow) mainWindow.webContents.send('media-key', 'next');
+        });
+        globalShortcut.register('MediaPreviousTrack', () => {
+            log('Global MediaPreviousTrack pressed');
+            if (mainWindow) mainWindow.webContents.send('media-key', 'prev');
+        });
+        globalShortcut.register('PrintScreen', () => {
+            log('Global PrintScreen pressed');
+            if (mainWindow) mainWindow.webContents.send('trigger-screenshot');
+        });
+    } catch (err) {
+        log('Failed to register global shortcuts: ' + err.message);
+    }
+}
+
+function unregisterMediaShortcuts() {
+    try {
+        globalShortcut.unregister('MediaNextTrack');
+        globalShortcut.unregister('MediaPreviousTrack');
+        globalShortcut.unregister('PrintScreen');
+    } catch (err) {
+        log('Failed to unregister global shortcuts: ' + err.message);
+    }
+}
+
+ipcMain.handle('take-screenshot', async () => {
+    const image = await mainWindow.webContents.capturePage();
+    const jpegBuffer = image.toJPEG(95); // 화질은 육안상 100% 동일하게 유지하면서 용량 극감
+    
+    let saveDir = settings.screenshotDestination;
+    if (!saveDir || !fs.existsSync(saveDir)) {
+        saveDir = app.getPath('downloads');
+    }
+    
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const date = now.getDate().toString().padStart(2, '0');
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const seconds = now.getSeconds().toString().padStart(2, '0');
+    const fileName = `${year}-${month}-${date} ${hours} ${minutes} ${seconds}.png`;
+    const savePath = path.join(saveDir, fileName);
+    
+    fs.writeFileSync(savePath, jpegBuffer);
+    log(`Screenshot saved to: ${savePath}`);
+    return { savePath, fileName };
+});

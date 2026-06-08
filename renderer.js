@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let deleteConfirmData = null;
     let lastBoundaryType = null; // 경계 상태 저장
     let lastBoundaryTime = 0;
+    let zoomScale = 1.0;
 
     // 이미지 드래그 이동 관련
     let isDragging = false;
@@ -77,6 +78,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('btn-maximize').addEventListener('click', () => window.api.windowMaximize());
         document.getElementById('btn-close').addEventListener('click', () => window.api.windowClose());
 
+        document.getElementById('start-btn-minimize').addEventListener('click', () => window.api.windowMinimize());
+        document.getElementById('start-btn-maximize').addEventListener('click', () => window.api.windowMaximize());
+        document.getElementById('start-btn-close').addEventListener('click', () => window.api.windowClose());
+
         document.getElementById('badge-folder-nav').addEventListener('click', () => window.api.toggleFolderNav());
         document.getElementById('badge-image-nav').addEventListener('click', () => window.api.toggleImageNav());
 
@@ -88,6 +93,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('select-copy-dest').addEventListener('click', async () => {
             const newPath = await window.api.selectCopyDestination();
             if (newPath) document.getElementById('copy-dest-path').textContent = newPath;
+        });
+
+        document.getElementById('select-screenshot-dest').addEventListener('click', async () => {
+            const newPath = await window.api.selectScreenshotDestination();
+            if (newPath) document.getElementById('screenshot-dest-path').textContent = newPath;
         });
 
         document.getElementById('cancel-delete').addEventListener('click', () => {
@@ -132,6 +142,41 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.api.onCopySuccess(handleCopySuccess);
         window.api.onConfirmDelete(handleConfirmDelete);
         window.api.onDeleteSuccess(handleDeleteSuccess);
+        window.api.onMediaKey((key) => {
+            window.api.log(`[Renderer] Media key received: ${key}`);
+            if (key === 'next') {
+                if (isAtLastImage()) {
+                    showBoundaryNotification('마지막 이미지입니다', '');
+                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('last');
+                } else {
+                    window.api.navigateImage(1);
+                }
+            } else if (key === 'prev') {
+                if (currentImageData && currentImageData.index === 0) {
+                    showBoundaryNotification('첫 번째 이미지입니다', '');
+                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('first');
+                } else {
+                    window.api.navigateImage(-1);
+                }
+            }
+        });
+
+        window.api.onTriggerScreenshot(() => {
+            triggerScreenshot();
+        });
+
+        window.api.onFullscreenKeyF10(() => {
+            if (isFullscreen) {
+                if (fullscreenMode === 'complete') {
+                    window.api.toggleFullscreen('complete');
+                } else {
+                    handleFullscreenChanged(true, 'complete');
+                }
+            } else {
+                window.api.toggleFullscreen('complete');
+            }
+        });
+
         window.api.onUnloadImage(() => {
             window.api.log('[Renderer] processing unload-image... (Start)');
 
@@ -166,7 +211,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 마우스 다운 핸들러 (창 이동 또는 이미지 이동 시작)
     function handleMouseDown(e) {
         // 인터랙티브 요소는 무시
-        if (e.target.closest('button, input, .no-drag, .modal, .menu-item, .status-badge, .progress-container')) return;
+        if (e.target.closest('button, input, .window-ctrl-btn, .window-btn, .no-drag, .modal, .menu-item, .status-badge, .progress-container')) return;
         if (e.target.closest('#settings-modal') || e.target.closest('#delete-modal')) return; // 모달 내부 클릭 무시
 
         // 우클릭은 무시
@@ -187,6 +232,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     function handleMouseMove(e) {
         if (isWindowDragging) {
             window.api.windowMove();
+        } else if (isDragging) {
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            imageOffsetX += dx;
+            imageOffsetY += dy;
+            applyImageTransform();
         }
     }
 
@@ -284,13 +337,50 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 openSettings();
                 break;
+            case 'F10':
+                e.preventDefault();
+                if (isFullscreen) {
+                    if (fullscreenMode === 'complete') {
+                        window.api.toggleFullscreen('complete');
+                    } else {
+                        handleFullscreenChanged(true, 'complete');
+                    }
+                } else {
+                    window.api.toggleFullscreen('complete');
+                }
+                break;
             case 'F11':
                 e.preventDefault();
-                window.api.toggleFullscreen();
+                if (e.ctrlKey) {
+                    if (isFullscreen) {
+                        if (fullscreenMode === 'complete') {
+                            window.api.toggleFullscreen('complete');
+                        } else {
+                            handleFullscreenChanged(true, 'complete');
+                        }
+                    } else {
+                        window.api.toggleFullscreen('complete');
+                    }
+                } else {
+                    if (isFullscreen) {
+                        if (fullscreenMode === 'normal') {
+                            window.api.toggleFullscreen('normal');
+                        } else {
+                            handleFullscreenChanged(true, 'normal');
+                        }
+                    } else {
+                        window.api.toggleFullscreen('normal');
+                    }
+                }
+                break;
+            case 'PrintScreen':
+            case 'Snapshot':
+                e.preventDefault();
+                triggerScreenshot();
                 break;
             case 'Insert':
                 e.preventDefault();
-                window.api.copyImage();
+                executeCopyImage();
                 break;
             case 'Delete':
                 e.preventDefault();
@@ -299,7 +389,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'z':
             case 'Z':
-                if (!e.ctrlKey) { e.preventDefault(); setViewMode('fitSmall'); }
+                if (!e.ctrlKey) {
+                    e.preventDefault();
+                    settings.fitSmall = !settings.fitSmall;
+                    const fitSmallCheckbox = document.getElementById('enable-fit-small');
+                    if (fitSmallCheckbox) fitSmallCheckbox.checked = settings.fitSmall;
+                    window.api.saveSettings(settings);
+                    updateViewMode(settings.viewMode);
+                    showModeNotification(settings.fitSmall ? '작은 그림 꽉차게: 켜짐' : '작은 그림 꽉차게: 꺼짐', '🔍');
+                }
                 break;
             case '0':
                 if (!e.ctrlKey) { e.preventDefault(); setViewMode('original'); }
@@ -320,6 +418,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 case 'e': e.preventDefault(); window.api.openFileLocation(); break;
                 case 'r': e.preventDefault(); window.api.toggleFolderNav(); break;
                 case 't': e.preventDefault(); window.api.toggleImageNav(); break;
+                case '=':
+                case '+':
+                    e.preventDefault();
+                    zoomImage(1);
+                    break;
+                case '-':
+                    e.preventDefault();
+                    zoomImage(-1);
+                    break;
             }
         }
     }
@@ -366,19 +473,136 @@ document.addEventListener('DOMContentLoaded', async () => {
         lastBoundaryTime = 0;
     }
 
-    function handleFullscreenChanged(fullscreen) {
+    let fullscreenMode = null;
+
+    function handleFullscreenChanged(fullscreen, mode) {
         isFullscreen = fullscreen;
-        document.body.classList.toggle('fullscreen', fullscreen);
+        if (!fullscreen) {
+            document.body.classList.remove('fullscreen', 'fullscreen-normal', 'fullscreen-complete');
+            fullscreenMode = null;
+        } else {
+            document.body.classList.add('fullscreen');
+            fullscreenMode = mode || 'normal';
+            if (fullscreenMode === 'complete') {
+                document.body.classList.add('fullscreen-complete');
+                document.body.classList.remove('fullscreen-normal');
+            } else {
+                document.body.classList.add('fullscreen-normal');
+                document.body.classList.remove('fullscreen-complete');
+            }
+        }
     }
 
     // 창 드래그 이동
 
+    function applyImageTransform() {
+        const transformStr = `translate(${imageOffsetX}px, ${imageOffsetY}px) scale(${zoomScale})`;
+        mainImage.style.transform = transformStr;
+        if (!secondImage.classList.contains('hidden')) {
+            secondImage.style.transform = transformStr;
+        }
+    }
 
     function resetImagePosition() {
         imageOffsetX = 0;
         imageOffsetY = 0;
+        zoomScale = 1.0;
         mainImage.style.transform = '';
         secondImage.style.transform = '';
+    }
+
+    function zoomImage(direction) {
+        if (!currentImageData) return;
+        if (direction > 0) {
+            zoomScale = Math.min(5.0, zoomScale + 0.1);
+        } else {
+            zoomScale = Math.max(0.1, zoomScale - 0.1);
+        }
+        applyImageTransform();
+        showModeNotification(`배율: ${Math.round(zoomScale * 100)}%`, '🔍');
+    }
+
+    async function playFallbackSynthSound() {
+        try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.12);
+            
+            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.15);
+        } catch (err) {
+            window.api.log('Failed to play fallback synth sound: ' + err.message);
+        }
+    }
+
+    function playAlertSound() {
+        const paths = [
+            'file:///C:/Windows/Media/Windows 경고 메시지.wav',
+            'file:///C:/Windows/Media/Windows Background.wav',
+            'file:///C:/Windows/Media/Windows Ding.wav'
+        ];
+        
+        let attempt = 0;
+        
+        const tryPlay = () => {
+            if (attempt >= paths.length) {
+                window.api.log('[Renderer] All system wave sounds failed. Playing fallback synth sound.');
+                playFallbackSynthSound();
+                return;
+            }
+            
+            const currentPath = paths[attempt];
+            const audio = new Audio(currentPath);
+            
+            audio.play()
+                .then(() => {
+                    window.api.log(`[Renderer] Successfully played system sound: ${currentPath}`);
+                })
+                .catch((err) => {
+                    window.api.log(`[Renderer] Failed to play system sound: ${currentPath} (${err.message}). Trying next.`);
+                    attempt++;
+                    tryPlay();
+                });
+        };
+        
+        tryPlay();
+    }
+
+    async function triggerScreenshot() {
+        try {
+            playAlertSound();
+            
+            const isTempHide = !document.body.classList.contains('fullscreen-complete');
+            if (isTempHide) {
+                document.body.classList.add('screenshot-temp-complete');
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 30));
+            
+            const result = await window.api.takeScreenshot();
+            
+            if (isTempHide) {
+                document.body.classList.remove('screenshot-temp-complete');
+            }
+            
+            showModeNotification(`스크린샷 저장 완료\n${result.fileName}`, '📸');
+        } catch (err) {
+            document.body.classList.remove('screenshot-temp-complete');
+            window.api.log('Failed to take screenshot: ' + err.message);
+            showError('스크린샷 저장에 실패했습니다.');
+        }
     }
 
     function handleImageLoaded(data) {
@@ -406,12 +630,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateViewMode(data.viewMode);
 
         let displayInfo = '';
-        if (isDualMode && data.secondFileName) {
-            displayInfo = `${data.fileName}, ${data.secondFileName} — ${data.index + 1}-${data.index + 2} / ${data.total}`;
+        if (isDualMode && data.secondName) {
+            displayInfo = `[${data.folderName}] ${data.name}, ${data.secondName} — ${data.index + 1}-${data.index + 2} / ${data.total}`;
         } else {
-            displayInfo = `${data.fileName} — ${data.index + 1} / ${data.total}`;
+            displayInfo = `[${data.folderName}] ${data.name} — ${data.index + 1} / ${data.total}`;
         }
         document.getElementById('toolbar-info').textContent = displayInfo;
+        document.title = displayInfo;
 
         const progress = ((data.index + 1) / data.total) * 100;
         progressBar.style.width = `${progress}%`;
@@ -519,6 +744,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function handleCopySuccess(data) {
+        playAlertSound();
         showModeNotification(`${data.fileName}\n복사 완료`, '📋');
     }
 
@@ -594,6 +820,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function updateViewMode(mode) {
         imageContainer.className = '';
         imageContainer.classList.add(`view-${mode}`);
+        imageContainer.classList.toggle('fit-small', settings.fitSmall);
 
         if (mode === 'dualLR' || mode === 'dualRL') {
             imageContainer.classList.add('dual-view');
@@ -603,6 +830,57 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function setViewMode(mode) {
         await window.api.setViewMode(mode);
+    }
+
+    async function executeCopyImage() {
+        const isDualMode = settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL';
+        if (isDualMode && currentImageData && currentImageData.secondPath) {
+            try {
+                if (!mainImage.complete || mainImage.naturalWidth === 0 || 
+                    !secondImage.complete || secondImage.naturalWidth === 0) {
+                    showError('이미지가 아직 완전히 로딩되지 않았습니다. 잠시 후 다시 시도해 주세요.');
+                    return;
+                }
+                
+                showModeNotification('이미지 합성 중...', '📋');
+                
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                const width1 = mainImage.naturalWidth;
+                const height1 = mainImage.naturalHeight;
+                const width2 = secondImage.naturalWidth;
+                const height2 = secondImage.naturalHeight;
+                
+                canvas.width = width1 + width2;
+                canvas.height = Math.max(height1, height2);
+                
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                if (settings.viewMode === 'dualLR') {
+                    const y1 = (canvas.height - height1) / 2;
+                    ctx.drawImage(mainImage, 0, y1, width1, height1);
+                    
+                    const y2 = (canvas.height - height2) / 2;
+                    ctx.drawImage(secondImage, width1, y2, width2, height2);
+                } else {
+                    const y2 = (canvas.height - height2) / 2;
+                    ctx.drawImage(secondImage, 0, y2, width2, height2);
+                    
+                    const y1 = (canvas.height - height1) / 2;
+                    ctx.drawImage(mainImage, width2, y1, width1, height1);
+                }
+                
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                await window.api.copyCombinedImage(dataUrl);
+            } catch (err) {
+                window.api.log(`[Renderer] Failed to combine images: ${err.message}`);
+                showError('이미지 병합 복사 실패: ' + err.message);
+            }
+        } else {
+            window.api.copyImage();
+        }
     }
 
     function handleContextMenu(e) {
@@ -621,7 +899,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     function updateContextMenuChecks(viewMode) {
         contextMenu.querySelectorAll('.menu-item').forEach(item => {
             const action = item.dataset.action;
-            if (['fitSmall', 'original', 'fit', 'fitWidth', 'dualLR', 'dualRL'].includes(action)) {
+            if (action === 'fitSmall') {
+                item.classList.toggle('active', settings.fitSmall);
+            } else if (['original', 'fit', 'fitWidth', 'dualLR', 'dualRL'].includes(action)) {
                 item.classList.toggle('active', action === viewMode);
             }
         });
@@ -631,13 +911,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         const action = e.currentTarget.dataset.action;
 
         switch (action) {
-            case 'fitSmall': case 'original': case 'fit': case 'fitWidth': case 'dualLR': case 'dualRL':
+            case 'fitSmall':
+                settings.fitSmall = !settings.fitSmall;
+                const fitSmallCheckbox = document.getElementById('enable-fit-small');
+                if (fitSmallCheckbox) fitSmallCheckbox.checked = settings.fitSmall;
+                window.api.saveSettings(settings);
+                updateViewMode(settings.viewMode);
+                showModeNotification(settings.fitSmall ? '작은 그림 꽉차게: 켜짐' : '작은 그림 꽉차게: 꺼짐', '🔍');
+                break;
+            case 'original': case 'fit': case 'fitWidth': case 'dualLR': case 'dualRL':
                 setViewMode(action); break;
             case 'openFolder': window.api.openFolder(); break;
             case 'openLocation': window.api.openFileLocation(); break;
             case 'toggleFolderNav': window.api.toggleFolderNav(); break;
             case 'toggleImageNav': window.api.toggleImageNav(); break;
-            case 'copyImage': window.api.copyImage(); break;
+            case 'copyImage': executeCopyImage(); break;
             case 'deleteItem': window.api.requestDelete(); break;
             case 'settings': openSettings(); break;
         }
@@ -692,6 +980,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const imageDragCheckbox = document.getElementById('enable-image-drag');
         if (imageDragCheckbox) imageDragCheckbox.checked = settings.enableImageDrag;
 
+        const fitSmallCheckbox = document.getElementById('enable-fit-small');
+        if (fitSmallCheckbox) fitSmallCheckbox.checked = settings.fitSmall !== false;
+
         const deleteModeRadio = document.querySelector(`input[name="deleteMode"][value="${settings.deleteMode}"]`);
         if (deleteModeRadio) deleteModeRadio.checked = true;
 
@@ -703,6 +994,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const copyDestPath = document.getElementById('copy-dest-path');
         if (copyDestPath && settings.copyDestination) copyDestPath.textContent = settings.copyDestination;
+
+        const screenshotDestPath = document.getElementById('screenshot-dest-path');
+        if (screenshotDestPath && settings.screenshotDestination) screenshotDestPath.textContent = settings.screenshotDestination;
 
         const wheelNavRadio = document.querySelector(`input[name="wheelAction"][value="${settings.wheelAction || 'prevNext'}"]`);
         if (wheelNavRadio) wheelNavRadio.checked = true;
@@ -718,6 +1012,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const viewModeEl = document.querySelector('input[name="viewMode"]:checked');
             const deleteModeEl = document.querySelector('input[name="deleteMode"]:checked');
             const imageDragEl = document.getElementById('enable-image-drag');
+            const fitSmallEl = document.getElementById('enable-fit-small');
             const preventDupFolderEl = document.getElementById('prevent-duplicate-folder');
             const preventDupImageEl = document.getElementById('prevent-duplicate-image');
             const wheelActionEl = document.querySelector('input[name="wheelAction"]:checked');
@@ -728,18 +1023,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 imageNavigation: imageNavEl ? imageNavEl.value : settings.imageNavigation,
                 viewMode: viewModeEl ? viewModeEl.value : settings.viewMode,
                 enableImageDrag: imageDragEl ? imageDragEl.checked : settings.enableImageDrag,
+                fitSmall: fitSmallEl ? fitSmallEl.checked : true,
                 deleteMode: deleteModeEl ? deleteModeEl.value : settings.deleteMode,
                 preventDuplicateFolder: preventDupFolderEl ? preventDupFolderEl.checked : true,
                 preventDuplicateImage: preventDupImageEl ? preventDupImageEl.checked : true,
                 wheelAction: wheelActionEl ? wheelActionEl.value : 'prevNext',
-                keyboardAction: keyboardActionEl ? keyboardActionEl.value : 'prevNext'
+                keyboardAction: keyboardActionEl ? keyboardActionEl.value : 'prevNext',
+                copyDestination: settings.copyDestination || '',
+                screenshotDestination: settings.screenshotDestination || ''
             };
 
             settings = await window.api.saveSettings(newSettings);
 
-            updateStatusBadges();
-            closeSettings();
-            showModeNotification('설정이 저장되었습니다', '✅');
             updateStatusBadges();
             closeSettings();
             showModeNotification('설정이 저장되었습니다', '✅');
