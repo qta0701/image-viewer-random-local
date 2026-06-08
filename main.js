@@ -826,33 +826,19 @@ async function deleteCurrentFolder() {
     const folderName = path.basename(targetFolder);
     log(`[deleteCurrentFolder] Starting deletion for: ${targetFolder}`);
 
-    // [EBUSY 방지] 삭제 전에 렌더러에 이미지 언로드를 요청하여 이전 폴더 내 파일 락을 확실히 해제
-    const unloadPromise = new Promise(resolve => {
-        deleteResolve = resolve;
-        setTimeout(() => { if (deleteResolve) deleteResolve(); }, 3000); // 최대 3초 대기
-    });
-    mainWindow.webContents.send('unload-image');
-    await unloadPromise;
-
-    // [New Logic] 폴더 삭제 전 다음 폴더로 미리 이동 (파일 잠금 해제 및 UX 개선)
-    log('[deleteCurrentFolder] Navigating to next folder first...');
+    // [New Logic] 폴더 삭제 전 다음 폴더로 즉시 화면 전환 (검은 화면 및 딜레이 제거)
+    log('[deleteCurrentFolder] Instantly navigating to next folder first...');
     const currentFolderIndex = siblingFolders.indexOf(targetFolder);
 
     let nextFolder = null;
     if (siblingFolders.length > 0) {
-        // 현재 폴더가 목록에 있다면
         if (settings.folderNavigation === 'random') {
-            // 랜덤은 아니고 그냥 다음꺼? 아니면 랜덤 로직? 
-            // 삭제 후 사용 경험상 그냥 다음 순서로 가는 게 자연스러움.
-            // 하지만 random 모드니까 랜덤 폴더를 뽑는 게 맞을 수도 있음.
-            // 여기선 단순히 '다음' 또는 '랜덤' 폴더를 로드.
             const candidates = siblingFolders.filter(f => f !== targetFolder);
             if (candidates.length > 0) {
                 const randIdx = Math.floor(Math.random() * candidates.length);
                 nextFolder = candidates[randIdx];
             }
         } else {
-            // 순차
             let nextIdx = currentFolderIndex + 1;
             if (nextIdx >= siblingFolders.length) nextIdx = 0; // 루프
             nextFolder = siblingFolders[nextIdx];
@@ -871,7 +857,6 @@ async function deleteCurrentFolder() {
             totalFolders: siblingFolders.length
         });
     } else {
-        // 더 이상 폴더가 없음
         log('[deleteCurrentFolder] No more folders to move to.');
         currentImages = [];
         currentFolder = '';
@@ -879,13 +864,8 @@ async function deleteCurrentFolder() {
         mainWindow.webContents.send('no-more-folders');
     }
 
-    // 렌더러가 이전 폴더 이미지를 언로드할 시간을 줌 + 뷰 이동 안정화
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // 혹시 모를 이미지 언로드 (이미 뷰는 이동했지만 확실히 하기 위해)
-    // 렌더러에 언로드 신호 보내기 (사실 이미 loadFolder 호출로 인해 렌더러가 새 이미지를 로딩하고 있을 거라서 불필요할 수 있지만, 
-    // 삭제할 폴더의 핸들을 놓게 하려면 필요할 수 있음. 하지만 loadFolder가 먼저 호출되면 렌더러는 이미 새 이미지 파일 핸들을 잡음.
-    // 따라서 삭제할 폴더의 파일 핸들은 자연스럽게 놓아짐.)
+    // [EBUSY 방지] 렌더러가 새 이미지를 화면에 로드하고 이전 이미지 락을 해제할 비동기 대기 시간 확보
+    await new Promise(resolve => setTimeout(resolve, 800));
 
     // CWD 변경
     try {
@@ -906,83 +886,56 @@ async function deleteCurrentFolder() {
             onFolderDeleteSuccess(targetFolder, folderName, true);
         } catch (err2) {
             log(`[deleteCurrentFolder] fs.rm failed: ${err2.message}`);
-            // 이미 다른 폴더로 이동했으므로 복구 로직 불필요. 에러만 사용자에게 알리지만, 사용자는 이미 다른 폴더를 보고 있음.
-            // 방해하지 않기 위해 로그만 남기거나 토스트 메시지
             mainWindow.webContents.send('error', `폴더 삭제 실패 (백그라운드)\n${err2.message}`);
         }
     }
 }
 
-function deleteCurrentImage() {
+async function deleteCurrentImage() {
     if (!currentImages[currentIndex]) return;
     const imagePath = path.join(currentFolder, currentImages[currentIndex]);
     log(`[deleteCurrentImage] Deleting: ${imagePath}`);
 
-    // 이미지 삭제는 굳이 선이동 안 해도 됨 (파일 하나라 빠름)
-    // 하지만 EBUSY 방지를 위해 로직 유지
-
-    const unloadPromise = new Promise(resolve => {
-        deleteResolve = resolve;
-        setTimeout(() => { if (deleteResolve) deleteResolve(); }, 5000);
-    });
-    mainWindow.webContents.send('unload-image');
-    // 메인 데이터에서 임시 제거
     const targetImageName = currentImages[currentIndex];
     const targetIndex = currentIndex;
 
-    unloadPromise.then(async () => {
+    // 1. 메모리 리스트에서 삭제할 이미지를 즉시 제거
+    currentImages.splice(targetIndex, 1);
+
+    // 2. 즉시 화면을 다음 이미지로 갱신하여 딜레이와 검은화면을 제거
+    if (currentImages.length === 0) {
+        // 이미지 다 지워짐 -> 다음 폴더 자동 이동
+        mainWindow.webContents.send('delete-success', { type: '이미지', name: targetImageName });
+        navigateFolder(1);
+    } else {
+        if (currentIndex >= currentImages.length) currentIndex = currentImages.length - 1;
+        sendImageData();
+        mainWindow.webContents.send('delete-success', { type: '이미지', name: targetImageName });
+    }
+
+    // 3. 렌더러가 다음 이미지를 로딩하여 기존 이미지 락을 해제할 때까지 비동기 대기
+    await new Promise(resolve => setTimeout(resolve, 800));
+
+    // 4. 백그라운드에서 기존 이미지 파일 삭제
+    try {
+        await shell.trashItem(imagePath);
+        log('[deleteCurrentImage] shell.trashItem success.');
+    } catch (e) {
+        log(`[deleteCurrentImage] shell.trashItem failed: ${e.message}. Trying fs.rm...`);
         try {
-            await shell.trashItem(imagePath);
-            log('[deleteCurrentImage] shell.trashItem success.');
-            onImageDeleteSuccess(targetImageName, targetIndex);
-        } catch (e) {
-            log(`[deleteCurrentImage] shell.trashItem failed: ${e.message}. Trying fs.rm...`);
-            try {
-                fs.rmSync(imagePath, { force: true });
-                onImageDeleteSuccess(targetImageName, targetIndex);
-            } catch (err2) {
-                mainWindow.webContents.send('error', '이미지 삭제 실패: ' + err2.message);
-                sendImageData(); // 복구
-            }
+            fs.rmSync(imagePath, { force: true });
+        } catch (err2) {
+            mainWindow.webContents.send('error', '이미지 삭제 실패 (백그라운드): ' + err2.message);
         }
-    });
+    }
 }
 
 function onFolderDeleteSuccess(folderPath, folderName, alreadyNavigated = false) {
-    // 이미 목록에서 제거하고 이동했으므로 리스트 관리만 하면 됨
     visitedFolders.delete(folderPath);
     const folderIdx = siblingFolders.indexOf(folderPath);
     if (folderIdx !== -1) siblingFolders.splice(folderIdx, 1);
 
-    // 알림은 띄워줌
     mainWindow.webContents.send('delete-success', { type: 'folder', name: folderName });
-
-    if (!alreadyNavigated) {
-        // 기존 로직 (사용 안 함)
-        if (siblingFolders.length > 0) {
-            const nextIdx = Math.min(folderIdx, siblingFolders.length - 1);
-            loadFolder(siblingFolders[nextIdx]);
-            //...
-        } else {
-            mainWindow.webContents.send('no-more-folders');
-        }
-    }
-}
-
-function onImageDeleteSuccess(imageName, index) {
-    currentImages.splice(index, 1);
-
-    if (currentImages.length === 0) {
-        // 폴더 내 이미지 모두 삭제됨 -> 다음 폴더 자동 이동?
-        mainWindow.webContents.send('delete-success', { type: '이미지', name: imageName });
-        setTimeout(() => {
-            navigateFolder(1);
-        }, 1000);
-    } else {
-        if (currentIndex >= currentImages.length) currentIndex = currentImages.length - 1;
-        mainWindow.webContents.send('delete-success', { type: '이미지', name: imageName });
-        sendImageData();
-    }
 }
 
 function registerMediaShortcuts() {
