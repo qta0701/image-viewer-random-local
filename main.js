@@ -826,6 +826,14 @@ async function deleteCurrentFolder() {
     const folderName = path.basename(targetFolder);
     log(`[deleteCurrentFolder] Starting deletion for: ${targetFolder}`);
 
+    // [EBUSY 방지] 삭제 전에 렌더러에 이미지 언로드를 요청하여 이전 폴더 내 파일 락을 확실히 해제
+    const unloadPromise = new Promise(resolve => {
+        deleteResolve = resolve;
+        setTimeout(() => { if (deleteResolve) deleteResolve(); }, 3000); // 최대 3초 대기
+    });
+    mainWindow.webContents.send('unload-image');
+    await unloadPromise;
+
     // [New Logic] 폴더 삭제 전 다음 폴더로 미리 이동 (파일 잠금 해제 및 UX 개선)
     log('[deleteCurrentFolder] Navigating to next folder first...');
     const currentFolderIndex = siblingFolders.indexOf(targetFolder);

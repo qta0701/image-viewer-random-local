@@ -253,6 +253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 window.api.executeDelete();
                 closeDeleteModal();
+                closeSettings(); // 설정창도 같이 닫음
             } else if (e.key === 'Escape') {
                 closeDeleteModal();
             }
