@@ -41,8 +41,8 @@ function loadSettings() {
     try {
         if (fs.existsSync(savedPath)) {
             settings = JSON.parse(fs.readFileSync(savedPath, 'utf8'));
-            if (settings.screenshotDestination === undefined) {
-                settings.screenshotDestination = '';
+            if (settings.firstImageSingle === undefined) {
+                settings.firstImageSingle = false;
             }
             log('Settings loaded successfully');
         } else {
@@ -57,7 +57,7 @@ function loadSettings() {
                 preventDuplicateFolder: true,
                 preventDuplicateImage: true,
                 copyDestination: '',
-                screenshotDestination: '',
+                firstImageSingle: false,
                 wheelAction: 'prevNext', // 'prevNext', 'firstLast'
                 keyboardAction: 'prevNext', // 'prevNext', 'firstLast'
             };
@@ -76,9 +76,9 @@ function saveSettings(newSettings) {
     // 설정 변경 시 반영
     if (mainWindow) {
         mainWindow.webContents.send('settings-updated', settings);
-        // 이동 모드 변경 시 방문 기록 초기화 (선택 사항)
-        // visitedImages.clear();
-        // visitedFolders.clear();
+        if (currentImages && currentImages.length > 0) {
+            sendImageData();
+        }
     }
 }
 
@@ -132,12 +132,12 @@ function createWindow() {
     mainWindow.webContents.on('before-input-event', (event, input) => {
         const key = input.key;
         
-        // PrintScreen/Snapshot 키는 keyDown이 차단될 수 있으므로, keyUp 또는 keyDown 시점에 모두 낚아채서 1회만 스크린샷 트리거
+        // PrintScreen/Snapshot 키가 감지되면 스크린샷 대신 이미지 복사(trigger-copy)로 작동시킴
         if (key === 'PrintScreen' || key === 'Snapshot') {
             event.preventDefault();
             if (input.type === 'keyUp') {
-                log('PrintScreen / Snapshot pressed (before-input-event keyUp)');
-                mainWindow.webContents.send('trigger-screenshot');
+                log('PrintScreen / Snapshot pressed (before-input-event keyUp -> copy)');
+                mainWindow.webContents.send('trigger-copy');
             }
             return;
         }
@@ -352,8 +352,19 @@ ipcMain.on('navigate-image', (event, direction) => {
     } else {
         // 순차 탐색
         let step = 1;
-        if (settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL') {
-            step = 2;
+        const isDualMode = settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL';
+        if (isDualMode) {
+            if (settings.firstImageSingle) {
+                if (direction === 1 && currentIndex === 0) {
+                    step = 1;
+                } else if (direction === -1 && currentIndex === 1) {
+                    step = 1;
+                } else {
+                    step = 2;
+                }
+            } else {
+                step = 2;
+            }
         }
 
         let nextIndex = currentIndex + (direction * step);
@@ -432,17 +443,6 @@ ipcMain.handle('select-copy-destination', async () => {
     return null;
 });
 
-ipcMain.handle('select-screenshot-destination', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openDirectory']
-    });
-    if (!result.canceled && result.filePaths.length > 0) {
-        settings.screenshotDestination = result.filePaths[0];
-        saveSettings(settings);
-        return settings.screenshotDestination;
-    }
-    return null;
-});
 
 ipcMain.handle('copy-combined-image', async (event, { dataUrl }) => {
     if (!settings.copyDestination) {
@@ -575,14 +575,31 @@ function updateSiblingFolders(parentDir) {
 function sendImageData() {
     if (!currentImages[currentIndex]) return;
 
+    const isDualMode = settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL';
+    if (isDualMode) {
+        if (settings.firstImageSingle) {
+            if (currentIndex > 0 && currentIndex % 2 === 0) {
+                currentIndex -= 1;
+            }
+        } else {
+            if (currentIndex % 2 !== 0) {
+                currentIndex -= 1;
+            }
+        }
+    }
+
     const imagePath = path.join(currentFolder, currentImages[currentIndex]);
     let secondImagePath = null;
 
     // 듀얼 뷰 모드일 때 (만화책 보기)
-    if (settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL') {
-        let secondIndex = currentIndex + 1;
-        if (secondIndex < currentImages.length) {
-            secondImagePath = path.join(currentFolder, currentImages[secondIndex]);
+    if (isDualMode) {
+        if (settings.firstImageSingle && currentIndex === 0) {
+            secondImagePath = null;
+        } else {
+            let secondIndex = currentIndex + 1;
+            if (secondIndex < currentImages.length) {
+                secondImagePath = path.join(currentFolder, currentImages[secondIndex]);
+            }
         }
     }
 
@@ -972,7 +989,7 @@ function registerMediaShortcuts() {
         });
         globalShortcut.register('PrintScreen', () => {
             log('Global PrintScreen pressed');
-            if (mainWindow) mainWindow.webContents.send('trigger-screenshot');
+            if (mainWindow) mainWindow.webContents.send('trigger-copy');
         });
     } catch (err) {
         log('Failed to register global shortcuts: ' + err.message);
@@ -988,27 +1005,3 @@ function unregisterMediaShortcuts() {
         log('Failed to unregister global shortcuts: ' + err.message);
     }
 }
-
-ipcMain.handle('take-screenshot', async () => {
-    const image = await mainWindow.webContents.capturePage();
-    const jpegBuffer = image.toJPEG(95); // 화질은 육안상 100% 동일하게 유지하면서 용량 극감
-    
-    let saveDir = settings.screenshotDestination;
-    if (!saveDir || !fs.existsSync(saveDir)) {
-        saveDir = app.getPath('downloads');
-    }
-    
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const date = now.getDate().toString().padStart(2, '0');
-    const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(2, '0');
-    const seconds = now.getSeconds().toString().padStart(2, '0');
-    const fileName = `${year}-${month}-${date} ${hours} ${minutes} ${seconds}.png`;
-    const savePath = path.join(saveDir, fileName);
-    
-    fs.writeFileSync(savePath, jpegBuffer);
-    log(`Screenshot saved to: ${savePath}`);
-    return { savePath, fileName };
-});

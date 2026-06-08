@@ -217,6 +217,7 @@
             <div class="menu-section">
                 <div class="menu-item" data-action="fitSmall"><span class="menu-check"></span><span class="menu-text">작은
                         그림도 꽉차게 보기</span><span class="menu-shortcut">Z</span></div>
+                <div class="menu-item" data-action="firstImageSingle"><span class="menu-check"></span><span class="menu-text">첫 장은 한 장으로 보기</span><span class="menu-shortcut">X</span></div>
                 <div class="menu-item" data-action="original"><span class="menu-check"></span><span class="menu-text">원본
                         크기(100%)로 보기</span><span class="menu-shortcut">0</span></div>
                 <div class="menu-item" data-action="fit"><span class="menu-check"></span><span class="menu-text">꽉차게
@@ -353,13 +354,6 @@
                         </div>
                     </div>
                     <div class="settings-section">
-                        <h3>📸 스크린샷 저장 폴더 <kbd>PrintScreen</kbd></h3>
-                        <div class="copy-dest-container">
-                            <span id="screenshot-dest-path" class="copy-dest-path">다운로드 폴더</span>
-                            <button id="select-screenshot-dest" class="secondary-btn small">폴더 선택</button>
-                        </div>
-                    </div>
-                    <div class="settings-section">
                         <h3>🖱️ 기타 옵션</h3>
                         <div class="checkbox-group">
                             <label class="checkbox-item"><input type="checkbox" id="enable-image-drag"><span
@@ -371,6 +365,11 @@
                                     class="checkbox-custom"></span>
                                 <div class="checkbox-content"><span class="checkbox-label">작은 그림도 꽉차게 보기 (Z)</span><span
                                         class="checkbox-desc">작은 이미지도 화면/분할 크기에 맞춰 꽉 차게 확대합니다.</span></div>
+                            </label>
+                            <label class="checkbox-item"><input type="checkbox" id="enable-first-image-single"><span
+                                    class="checkbox-custom"></span>
+                                <div class="checkbox-content"><span class="checkbox-label">첫 장은 한 장으로 보기 (X)</span><span
+                                        class="checkbox-desc">두장보기 모드일 때 첫 페이지(표지)를 1장만 노출하고 그 다음 장부터 두 장씩 노출합니다.</span></div>
                             </label>
                         </div>
                     </div>

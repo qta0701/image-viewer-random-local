@@ -60,9 +60,8 @@ contextBridge.exposeInMainWorld('api', {
     onNoMoreFolders: (callback) => ipcRenderer.on('no-more-folders', () => callback()),
     log: (message) => ipcRenderer.send('log-message', message),
 
-    takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
     onMediaKey: (callback) => ipcRenderer.on('media-key', (event, key) => callback(key)),
-    onTriggerScreenshot: (callback) => ipcRenderer.on('trigger-screenshot', () => callback()),
+    onTriggerCopy: (callback) => ipcRenderer.on('trigger-copy', () => callback()),
 
     removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel)
 });

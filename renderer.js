@@ -95,10 +95,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (newPath) document.getElementById('copy-dest-path').textContent = newPath;
         });
 
-        document.getElementById('select-screenshot-dest').addEventListener('click', async () => {
-            const newPath = await window.api.selectScreenshotDestination();
-            if (newPath) document.getElementById('screenshot-dest-path').textContent = newPath;
-        });
 
         document.getElementById('cancel-delete').addEventListener('click', () => {
             closeDeleteModal();
@@ -161,8 +157,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
 
-        window.api.onTriggerScreenshot(() => {
-            triggerScreenshot();
+        window.api.onTriggerCopy(() => {
+            executeCopyImage();
         });
 
         window.api.onFullscreenKeyF10(() => {
@@ -375,9 +371,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 break;
             case 'PrintScreen':
             case 'Snapshot':
-                e.preventDefault();
-                triggerScreenshot();
-                break;
             case 'Insert':
                 e.preventDefault();
                 executeCopyImage();
@@ -397,6 +390,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     window.api.saveSettings(settings);
                     updateViewMode(settings.viewMode);
                     showModeNotification(settings.fitSmall ? '작은 그림 꽉차게: 켜짐' : '작은 그림 꽉차게: 꺼짐', '🔍');
+                }
+                break;
+            case 'x':
+            case 'X':
+                if (!e.ctrlKey) {
+                    e.preventDefault();
+                    settings.firstImageSingle = !settings.firstImageSingle;
+                    const firstImageSingleCheckbox = document.getElementById('enable-first-image-single');
+                    if (firstImageSingleCheckbox) firstImageSingleCheckbox.checked = settings.firstImageSingle;
+                    window.api.saveSettings(settings);
+                    showModeNotification(settings.firstImageSingle ? '첫 장 한 장으로 보기: 켜짐' : '첫 장 한 장으로 보기: 꺼짐', '📖');
                 }
                 break;
             case '0':
@@ -537,8 +541,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.12);
             
-            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            gain.gain.setValueAtTime(0.125, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.005, audioCtx.currentTime + 0.15);
             
             osc.start(audioCtx.currentTime);
             osc.stop(audioCtx.currentTime + 0.15);
@@ -549,7 +553,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function playAlertSound() {
         const paths = [
-            'file:///C:/Windows/Media/Windows 경고 메시지.wav',
+            'file:///C:/Windows/Media/Windows 배터리 부족 경보.wav',
+            'file:///C:/Windows/Media/Windows Battery Low.wav',
             'file:///C:/Windows/Media/Windows Background.wav',
             'file:///C:/Windows/Media/Windows Ding.wav'
         ];
@@ -565,10 +570,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             
             const currentPath = paths[attempt];
             const audio = new Audio(currentPath);
+            audio.volume = 0.5; // 음량을 50%로 설정
             
             audio.play()
                 .then(() => {
-                    window.api.log(`[Renderer] Successfully played system sound: ${currentPath}`);
+                    window.api.log(`[Renderer] Successfully played system sound with 50% volume: ${currentPath}`);
                 })
                 .catch((err) => {
                     window.api.log(`[Renderer] Failed to play system sound: ${currentPath} (${err.message}). Trying next.`);
@@ -580,30 +586,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         tryPlay();
     }
 
-    async function triggerScreenshot() {
-        try {
-            playAlertSound();
-            
-            const isTempHide = !document.body.classList.contains('fullscreen-complete');
-            if (isTempHide) {
-                document.body.classList.add('screenshot-temp-complete');
-            }
-            
-            await new Promise(resolve => setTimeout(resolve, 30));
-            
-            const result = await window.api.takeScreenshot();
-            
-            if (isTempHide) {
-                document.body.classList.remove('screenshot-temp-complete');
-            }
-            
-            showModeNotification(`스크린샷 저장 완료\n${result.fileName}`, '📸');
-        } catch (err) {
-            document.body.classList.remove('screenshot-temp-complete');
-            window.api.log('Failed to take screenshot: ' + err.message);
-            showError('스크린샷 저장에 실패했습니다.');
-        }
-    }
 
     function handleImageLoaded(data) {
         currentImageData = data;
@@ -745,7 +727,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function handleCopySuccess(data) {
         playAlertSound();
-        showModeNotification(`${data.fileName}\n복사 완료`, '📋');
     }
 
     function handleConfirmDelete(data) {
@@ -842,8 +823,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     return;
                 }
                 
-                showModeNotification('이미지 합성 중...', '📋');
-                
+
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 
@@ -901,6 +881,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const action = item.dataset.action;
             if (action === 'fitSmall') {
                 item.classList.toggle('active', settings.fitSmall);
+            } else if (action === 'firstImageSingle') {
+                item.classList.toggle('active', settings.firstImageSingle);
             } else if (['original', 'fit', 'fitWidth', 'dualLR', 'dualRL'].includes(action)) {
                 item.classList.toggle('active', action === viewMode);
             }
@@ -918,6 +900,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 window.api.saveSettings(settings);
                 updateViewMode(settings.viewMode);
                 showModeNotification(settings.fitSmall ? '작은 그림 꽉차게: 켜짐' : '작은 그림 꽉차게: 꺼짐', '🔍');
+                break;
+            case 'firstImageSingle':
+                settings.firstImageSingle = !settings.firstImageSingle;
+                const firstImageSingleCheckbox = document.getElementById('enable-first-image-single');
+                if (firstImageSingleCheckbox) firstImageSingleCheckbox.checked = settings.firstImageSingle;
+                window.api.saveSettings(settings);
+                showModeNotification(settings.firstImageSingle ? '첫 장 한 장으로 보기: 켜짐' : '첫 장 한 장으로 보기: 꺼짐', '📖');
                 break;
             case 'original': case 'fit': case 'fitWidth': case 'dualLR': case 'dualRL':
                 setViewMode(action); break;
@@ -995,8 +984,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const copyDestPath = document.getElementById('copy-dest-path');
         if (copyDestPath && settings.copyDestination) copyDestPath.textContent = settings.copyDestination;
 
-        const screenshotDestPath = document.getElementById('screenshot-dest-path');
-        if (screenshotDestPath && settings.screenshotDestination) screenshotDestPath.textContent = settings.screenshotDestination;
+        const firstImageSingleCheckbox = document.getElementById('enable-first-image-single');
+        if (firstImageSingleCheckbox) firstImageSingleCheckbox.checked = settings.firstImageSingle === true;
 
         const wheelNavRadio = document.querySelector(`input[name="wheelAction"][value="${settings.wheelAction || 'prevNext'}"]`);
         if (wheelNavRadio) wheelNavRadio.checked = true;
@@ -1013,6 +1002,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const deleteModeEl = document.querySelector('input[name="deleteMode"]:checked');
             const imageDragEl = document.getElementById('enable-image-drag');
             const fitSmallEl = document.getElementById('enable-fit-small');
+            const firstImageSingleEl = document.getElementById('enable-first-image-single');
             const preventDupFolderEl = document.getElementById('prevent-duplicate-folder');
             const preventDupImageEl = document.getElementById('prevent-duplicate-image');
             const wheelActionEl = document.querySelector('input[name="wheelAction"]:checked');
@@ -1024,16 +1014,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 viewMode: viewModeEl ? viewModeEl.value : settings.viewMode,
                 enableImageDrag: imageDragEl ? imageDragEl.checked : settings.enableImageDrag,
                 fitSmall: fitSmallEl ? fitSmallEl.checked : true,
+                firstImageSingle: firstImageSingleEl ? firstImageSingleEl.checked : false,
                 deleteMode: deleteModeEl ? deleteModeEl.value : settings.deleteMode,
                 preventDuplicateFolder: preventDupFolderEl ? preventDupFolderEl.checked : true,
                 preventDuplicateImage: preventDupImageEl ? preventDupImageEl.checked : true,
                 wheelAction: wheelActionEl ? wheelActionEl.value : 'prevNext',
                 keyboardAction: keyboardActionEl ? keyboardActionEl.value : 'prevNext',
-                copyDestination: settings.copyDestination || '',
-                screenshotDestination: settings.screenshotDestination || ''
+                copyDestination: settings.copyDestination || ''
             };
 
             settings = await window.api.saveSettings(newSettings);
+
+            if (settings.viewMode === 'dualLR' || settings.viewMode === 'dualRL') {
+                setViewMode(settings.viewMode);
+            }
 
             updateStatusBadges();
             closeSettings();
