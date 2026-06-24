@@ -308,7 +308,7 @@ ipcMain.on('open-file-location', () => {
 ipcMain.on('open-file', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile'],
-        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }]
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'jfif', 'png', 'gif', 'webp', 'bmp', 'ico', 'svg', 'avif'] }]
     });
     if (!result.canceled && result.filePaths.length > 0) {
         const filePath = result.filePaths[0];
@@ -530,7 +530,7 @@ function loadFolder(folderPath, pushHistory = true) {
         const files = fs.readdirSync(folderPath);
         currentImages = files.filter(file => {
             const ext = path.extname(file).toLowerCase();
-            return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext);
+            return ['.jpg', '.jpeg', '.jfif', '.png', '.gif', '.webp', '.bmp', '.ico', '.svg', '.avif'].includes(ext);
         }).sort((a, b) => {
             return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
         });

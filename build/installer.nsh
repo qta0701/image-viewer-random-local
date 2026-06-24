@@ -7,6 +7,10 @@
   WriteRegStr HKCU "Software\Classes\.jpeg\shell\ImageViewer" "Icon" "$INSTDIR\이미지 뷰어.exe,0"
   WriteRegStr HKCU "Software\Classes\.jpeg\shell\ImageViewer\command" "" '"$INSTDIR\이미지 뷰어.exe" "%1"'
 
+  WriteRegStr HKCU "Software\Classes\.jfif\shell\ImageViewer" "" "이미지 뷰어로 보기"
+  WriteRegStr HKCU "Software\Classes\.jfif\shell\ImageViewer" "Icon" "$INSTDIR\이미지 뷰어.exe,0"
+  WriteRegStr HKCU "Software\Classes\.jfif\shell\ImageViewer\command" "" '"$INSTDIR\이미지 뷰어.exe" "%1"'
+
   WriteRegStr HKCU "Software\Classes\.png\shell\ImageViewer" "" "이미지 뷰어로 보기"
   WriteRegStr HKCU "Software\Classes\.png\shell\ImageViewer" "Icon" "$INSTDIR\이미지 뷰어.exe,0"
   WriteRegStr HKCU "Software\Classes\.png\shell\ImageViewer\command" "" '"$INSTDIR\이미지 뷰어.exe" "%1"'
@@ -39,6 +43,7 @@
 !macro customUninstall
   DeleteRegKey HKCU "Software\Classes\.jpg\shell\ImageViewer"
   DeleteRegKey HKCU "Software\Classes\.jpeg\shell\ImageViewer"
+  DeleteRegKey HKCU "Software\Classes\.jfif\shell\ImageViewer"
   DeleteRegKey HKCU "Software\Classes\.png\shell\ImageViewer"
   DeleteRegKey HKCU "Software\Classes\.webp\shell\ImageViewer"
   DeleteRegKey HKCU "Software\Classes\.gif\shell\ImageViewer"
