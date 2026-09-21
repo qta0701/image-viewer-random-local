@@ -1056,33 +1056,72 @@ async function deleteCurrentFolder() {
     const currentFolderIndex = siblingFolders.indexOf(targetFolder);
 
     let nextFolder = null;
+    const normTarget = normPath(targetFolder);
+
     if (siblingFolders.length > 0) {
-        if (['random', 'randomRangeDate', 'randomRecentDate', 'randomOldestDate'].includes(settings.folderNavigation)) {
-            const candidates = siblingFolders.filter(f => f !== targetFolder);
+        if (['randomRangeDate', 'randomRecentDate', 'randomOldestDate'].includes(settings.folderNavigation)) {
+            // [날짜 기준 범위 랜덤 이동 모드]
+            // 삭제 시 완전 랜덤이 아닌, 삭제되는 폴더의 저장날짜 기준 직전/직후 날짜 폴더로 이동
+            const sorted = getSortedSiblingFolders('dateDesc'); // 최신순 (인덱스 작을수록 최신, 클수록 과거)
+            const curIdx = sorted.findIndex(f => normPath(f) === normTarget);
+
+            if (curIdx !== -1) {
+                if (settings.folderNavigation === 'randomOldestDate') {
+                    // 최신방향 이동 모드: 직전 날짜(더 최신 방향) 우선 탐색, 없으면 직후(더 과거)
+                    if (curIdx - 1 >= 0) {
+                        nextFolder = sorted[curIdx - 1];
+                    } else if (curIdx + 1 < sorted.length) {
+                        nextFolder = sorted[curIdx + 1];
+                    }
+                } else {
+                    // randomRecentDate(과거방향) 및 randomRangeDate(앞뒤범위): 직후 날짜(더 과거 방향) 우선 탐색, 없으면 직전(더 최신)
+                    if (curIdx + 1 < sorted.length) {
+                        nextFolder = sorted[curIdx + 1];
+                    } else if (curIdx - 1 >= 0) {
+                        nextFolder = sorted[curIdx - 1];
+                    }
+                }
+            }
+
+            // 만약 curIdx에서 못 찾았거나 다음/이전이 없는 경우, 삭제 대상 외의 후보군에서 안전하게 지정
+            if (!nextFolder) {
+                const candidates = sorted.filter(f => normPath(f) !== normTarget);
+                if (candidates.length > 0) nextFolder = candidates[0];
+            }
+        } else if (settings.folderNavigation === 'random') {
+            // 완전 랜덤 모드인 경우에만 무작위 이동
+            const candidates = siblingFolders.filter(f => normPath(f) !== normTarget);
             if (candidates.length > 0) {
                 const randIdx = Math.floor(Math.random() * candidates.length);
                 nextFolder = candidates[randIdx];
             }
         } else {
+            // 순차 탐색 모드 (next, dateDesc, dateAsc, loop 등)
             const sortedFolders = getSortedSiblingFolders(settings.folderNavigation);
-            const currentFolderIndex = sortedFolders.indexOf(targetFolder);
-            let nextIdx = currentFolderIndex + 1;
+            const curIdx = sortedFolders.findIndex(f => normPath(f) === normTarget);
+            let nextIdx = curIdx !== -1 ? curIdx + 1 : 0;
             if (nextIdx >= sortedFolders.length) nextIdx = 0; // 루프
-            nextFolder = sortedFolders[nextIdx];
+            if (sortedFolders.length > 0 && sortedFolders[nextIdx] && normPath(sortedFolders[nextIdx]) !== normTarget) {
+                nextFolder = sortedFolders[nextIdx];
+            } else {
+                const candidates = sortedFolders.filter(f => normPath(f) !== normTarget);
+                if (candidates.length > 0) nextFolder = candidates[0];
+            }
         }
     }
 
-    if (nextFolder && nextFolder !== targetFolder) {
+    if (nextFolder && normPath(nextFolder) !== normTarget) {
         log(`[deleteCurrentFolder] Moving view to: ${nextFolder}`);
         loadFolder(nextFolder);
         // UI 업데이트
         const sortedFolders = getSortedSiblingFolders(settings.folderNavigation);
+        const nextIdx = sortedFolders.findIndex(f => normPath(f) === normPath(nextFolder));
         mainWindow.webContents.send('folder-changed', {
             folderName: path.basename(nextFolder),
             direction: 'next',
             folderNavigation: settings.folderNavigation,
-            currentFolderIndex: sortedFolders.indexOf(nextFolder) + 1,
-            totalFolders: sortedFolders.length
+            currentFolderIndex: (nextIdx !== -1 ? nextIdx : 0) + 1,
+            totalFolders: Math.max(1, sortedFolders.length - 1)
         });
     } else {
         log('[deleteCurrentFolder] No more folders to move to.');
