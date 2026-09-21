@@ -143,14 +143,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (key === 'next') {
                 if (isAtLastImage()) {
                     showBoundaryNotification('마지막 이미지입니다', '');
-                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('last');
+                    if (settings.folderNavigation !== 'none' && settings.folderNavigation !== 'loop') window.api.navigateFromBoundary('last');
                 } else {
                     window.api.navigateImage(1);
                 }
             } else if (key === 'prev') {
                 if (currentImageData && currentImageData.index === 0) {
                     showBoundaryNotification('첫 번째 이미지입니다', '');
-                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('first');
+                    if (settings.folderNavigation !== 'none' && settings.folderNavigation !== 'loop') window.api.navigateFromBoundary('first');
                 } else {
                     window.api.navigateImage(-1);
                 }
@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 if (currentImageData && currentImageData.index === 0) {
                     showBoundaryNotification('첫 번째 이미지입니다', '');
-                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('first');
+                    if (settings.folderNavigation !== 'none' && settings.folderNavigation !== 'loop') window.api.navigateFromBoundary('first');
                 } else {
                     if (settings.keyboardAction === 'firstLast') window.api.goToFirstImage();
                     else window.api.navigateImage(-1);
@@ -284,7 +284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 if (isAtLastImage()) {
                     showBoundaryNotification('마지막 이미지입니다', '');
-                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('last');
+                    if (settings.folderNavigation !== 'none' && settings.folderNavigation !== 'loop') window.api.navigateFromBoundary('last');
                 } else {
                     if (settings.keyboardAction === 'firstLast') window.api.goToLastImage();
                     else window.api.navigateImage(1);
@@ -294,7 +294,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 if (currentImageData && currentImageData.index === 0) {
                     showBoundaryNotification('첫 번째 이미지입니다', '');
-                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('first');
+                    if (settings.folderNavigation !== 'none' && settings.folderNavigation !== 'loop') window.api.navigateFromBoundary('first');
                 } else {
                     clearBoundaryState();
                     window.api.navigateImage(-1);
@@ -304,7 +304,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 e.preventDefault();
                 if (isAtLastImage()) {
                     showBoundaryNotification('마지막 이미지입니다', '');
-                    if (settings.folderNavigation !== 'none') window.api.navigateFromBoundary('last');
+                    if (settings.folderNavigation !== 'none' && settings.folderNavigation !== 'loop') window.api.navigateFromBoundary('last');
                 } else {
                     clearBoundaryState();
                     window.api.navigateImage(1);
@@ -651,10 +651,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         const folderBadge = document.getElementById('badge-folder-nav');
         const imageBadge = document.getElementById('badge-image-nav');
 
-        const folderNavActive = settings.folderNavigation !== 'next';
+        const folderNavActive = settings.folderNavigation !== 'next' && settings.folderNavigation !== 'sequential';
         folderBadge.classList.toggle('active', folderNavActive);
 
-        const folderNavTexts = { 'next': '순차폴더', 'random': '랜덤폴더', 'loop': '폴더순환' };
+        const folderNavTexts = {
+            'next': '순차폴더',
+            'sequential': '순차폴더',
+            'random': '랜덤폴더',
+            'dateDesc': '날짜내림순',
+            'dateAsc': '날짜오름순',
+            'loop': '폴더순환',
+            'none': '폴더순환'
+        };
         folderBadge.querySelector('.badge-text').textContent = folderNavTexts[settings.folderNavigation] || '순차폴더';
 
         imageBadge.classList.toggle('active', settings.imageNavigation === 'random');
@@ -667,7 +675,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         folderNotification.querySelector('.notification-folder').textContent = data.folderName;
 
         const directionText = data.direction === 'next' ? '다음 폴더' : '이전 폴더';
-        const navModeTexts = { 'next': '순차', 'random': '랜덤', 'loop': '순환' };
+        const navModeTexts = {
+            'next': '순차',
+            'sequential': '순차',
+            'random': '랜덤',
+            'dateDesc': '날짜내림',
+            'dateAsc': '날짜오름',
+            'loop': '순환',
+            'none': '순환'
+        };
         const navModeText = navModeTexts[data.folderNavigation] || '순차';
         const folderCountText = `${data.currentFolderIndex} / ${data.totalFolders}`;
 
@@ -860,7 +876,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showError('이미지 병합 복사 실패: ' + err.message);
             }
         } else {
-            window.api.copyImage();
+            // 2장 보기 모드에서 마지막 이미지(또는 첫 장)로 인해 1장만 노출되는 경우 및 단일 이미지 모드
+            if (!currentImageData || !currentImageData.path) {
+                showError('복사할 이미지가 없습니다.');
+                return;
+            }
+            try {
+                await window.api.copyImage(currentImageData.path);
+            } catch (err) {
+                window.api.log(`[Renderer] copyImage failed: ${err.message}`);
+                showError('이미지 복사 실패: ' + err.message);
+            }
         }
     }
 
@@ -958,7 +984,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function updateSettingsUI() {
-        const folderNavRadio = document.querySelector(`input[name="folderNav"][value="${settings.folderNavigation}"]`);
+        let folderNavVal = settings.folderNavigation;
+        if (folderNavVal === 'sequential') folderNavVal = 'next';
+        else if (folderNavVal === 'none') folderNavVal = 'loop';
+        const folderNavRadio = document.querySelector(`input[name="folderNav"][value="${folderNavVal}"]`);
         if (folderNavRadio) folderNavRadio.checked = true;
 
         const imageNavRadio = document.querySelector(`input[name="imageNav"][value="${settings.imageNavigation}"]`);

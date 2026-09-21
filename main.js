@@ -410,8 +410,12 @@ ipcMain.on('navigate-folder', (event, direction) => {
 
 // 설정 토글 (배지 클릭)
 ipcMain.on('toggle-folder-nav', () => {
-    const modes = ['random', 'sequential', 'none'];
-    const currentIdx = modes.indexOf(settings.folderNavigation);
+    const modes = ['next', 'random', 'dateDesc', 'dateAsc', 'loop'];
+    let currentNav = settings.folderNavigation;
+    if (currentNav === 'sequential') currentNav = 'next';
+    else if (currentNav === 'none') currentNav = 'loop';
+    let currentIdx = modes.indexOf(currentNav);
+    if (currentIdx === -1) currentIdx = 0;
     const nextIdx = (currentIdx + 1) % modes.length;
     settings.folderNavigation = modes[nextIdx];
     saveSettings(settings); // 저장 및 UI 업데이트 전송됨
@@ -426,8 +430,11 @@ ipcMain.on('toggle-image-nav', () => {
 });
 
 // 이미지 복사
-ipcMain.on('copy-image', () => {
-    copyCurrentImage();
+ipcMain.handle('copy-image', async (event, targetPath) => {
+    return copyCurrentImage(targetPath);
+});
+ipcMain.on('copy-image', (event, targetPath) => {
+    copyCurrentImage(targetPath);
 });
 
 // 복사 경로 선택
@@ -572,6 +579,37 @@ function updateSiblingFolders(parentDir) {
     }
 }
 
+function getSortedSiblingFolders(mode = settings.folderNavigation) {
+    if (!siblingFolders || siblingFolders.length === 0) return [];
+    const folders = [...siblingFolders];
+
+    if (mode === 'dateDesc' || mode === 'dateAsc') {
+        const statsMap = new Map();
+        for (const f of folders) {
+            try {
+                const stat = fs.statSync(f);
+                statsMap.set(f, stat.mtimeMs || 0);
+            } catch {
+                statsMap.set(f, 0);
+            }
+        }
+
+        folders.sort((a, b) => {
+            const timeA = statsMap.get(a) || 0;
+            const timeB = statsMap.get(b) || 0;
+            if (timeA !== timeB) {
+                return mode === 'dateDesc' ? timeB - timeA : timeA - timeB;
+            }
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        });
+    } else {
+        // 이름순 (next, sequential, random, loop 등 기본 정렬)
+        folders.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    }
+
+    return folders;
+}
+
 function sendImageData() {
     if (!currentImages[currentIndex]) return;
 
@@ -603,6 +641,8 @@ function sendImageData() {
         }
     }
 
+    const sortedFolders = getSortedSiblingFolders();
+
     mainWindow.webContents.send('image-loaded', {
         path: imagePath,
         secondPath: secondImagePath,
@@ -614,8 +654,8 @@ function sendImageData() {
         viewMode: settings.viewMode,
         folderNavigation: settings.folderNavigation,
         imageNavigation: settings.imageNavigation,
-        currentFolderIndex: siblingFolders.indexOf(currentFolder) + 1,
-        totalFolders: siblingFolders.length
+        currentFolderIndex: sortedFolders.indexOf(currentFolder) + 1,
+        totalFolders: sortedFolders.length
     });
 }
 
@@ -675,6 +715,11 @@ function goToImage(index) {
 }
 
 function navigateFolder(direction) {
+    if (settings.folderNavigation === 'loop' || settings.folderNavigation === 'none') {
+        mainWindow.webContents.send('no-more-folders');
+        return;
+    }
+
     if (settings.folderNavigation === 'random') {
         if (direction < 0) {
             // 이전 폴더 (랜덤 모드여도 이전은 히스토리 따라가야 함)
@@ -683,26 +728,16 @@ function navigateFolder(direction) {
                 historyStack.pop();
                 // 그 전 폴더 가져오기
                 const prevFolder = historyStack[historyStack.length - 1];
-                // 히스토리 추가 없이 로드 (이미 스택에 있으므로) - 단, loadFolder 내부 로직에 주의
-                // 여기서 이미 pop을 했으므로, loadFolder에서 push를 안 하도록 해야 함.
-                // 하지만 loadFolder는 pushHistory=true가 기본.
-                // 문제는, loadFolder를 그냥 부르면 push가 됨. prevFolder가 다시 push 되어 중복됨.
-                // 따라서 loadFolder(path, false) 형태로 호출 필요.
-                // 또한, 스택의 맨 위가 현재 보고 있는 폴더여야 논리가 맞음.
-
-                // 로직 정교화:
-                // 1. 현재 historyStack = [A, B, C] (C가 현재)
-                // 2. Back 누름 -> C pop -> [A, B]. B를 로드. 
-                // 3. loadFolder(B, false) -> 스택 유지 [A, B]. Current=B. 성공.
-
+                // 히스토리 추가 없이 로드 (이미 스택에 있으므로)
                 loadFolder(prevFolder, false);
 
+                const sortedFolders = getSortedSiblingFolders();
                 mainWindow.webContents.send('folder-changed', {
                     folderName: path.basename(prevFolder),
                     direction: 'prev',
                     folderNavigation: 'random', // UI 표시는 랜덤 모드 유지
-                    currentFolderIndex: siblingFolders.indexOf(prevFolder) + 1,
-                    totalFolders: siblingFolders.length
+                    currentFolderIndex: sortedFolders.indexOf(prevFolder) + 1,
+                    totalFolders: sortedFolders.length
                 });
             } else {
                 // 히스토리 없음
@@ -715,30 +750,42 @@ function navigateFolder(direction) {
         return;
     }
 
-    // 순차 탐색
-    const currentFolderIdx = siblingFolders.indexOf(currentFolder);
+    // 순차 탐색 (이름순 'next'/'sequential', 날짜 내림차순 'dateDesc', 날짜 오름차순 'dateAsc')
+    const sortedFolders = getSortedSiblingFolders(settings.folderNavigation);
+    const currentFolderIdx = sortedFolders.indexOf(currentFolder);
     let nextIdx = currentFolderIdx + direction;
 
-    if (nextIdx < 0 || nextIdx >= siblingFolders.length) {
+    if (nextIdx < 0 || nextIdx >= sortedFolders.length) {
         mainWindow.webContents.send('no-more-folders');
         return;
     }
 
-    const nextFolder = siblingFolders[nextIdx];
+    const nextFolder = sortedFolders[nextIdx];
     loadFolder(nextFolder);
     mainWindow.webContents.send('folder-changed', {
         folderName: path.basename(nextFolder),
         direction: direction > 0 ? 'next' : 'prev',
-        folderNavigation: 'sequential',
+        folderNavigation: settings.folderNavigation,
         currentFolderIndex: nextIdx + 1,
-        totalFolders: siblingFolders.length
+        totalFolders: sortedFolders.length
     });
 }
 
-function copyCurrentImage() {
-    if (!currentImages[currentIndex] || !settings.copyDestination) {
+function copyCurrentImage(targetFilePath = null) {
+    let fileToCopy = '';
+    let srcFolder = '';
+
+    if (targetFilePath && typeof targetFilePath === 'string') {
+        fileToCopy = path.basename(targetFilePath);
+        srcFolder = path.dirname(targetFilePath);
+    } else {
+        fileToCopy = currentImages[currentIndex];
+        srcFolder = currentFolder;
+    }
+
+    if (!fileToCopy || !srcFolder || !settings.copyDestination) {
         mainWindow.webContents.send('error', '복사할 이미지가 없거나 저장 경로가 설정되지 않았습니다.');
-        return;
+        return false;
     }
 
     if (!fs.existsSync(settings.copyDestination)) {
@@ -746,19 +793,28 @@ function copyCurrentImage() {
             fs.mkdirSync(settings.copyDestination, { recursive: true });
         } catch (err) {
             mainWindow.webContents.send('error', '저장 경로를 생성할 수 없습니다.');
-            return;
+            return false;
         }
     }
 
-    const srcPath = path.join(currentFolder, currentImages[currentIndex]);
-    const destPath = path.join(settings.copyDestination, currentImages[currentIndex]);
+    const srcPath = path.join(srcFolder, fileToCopy);
+    if (!fs.existsSync(srcPath)) {
+        mainWindow.webContents.send('error', '복사할 원본 이미지 파일을 찾을 수 없습니다.');
+        return false;
+    }
 
-    // 파일명 중복 처리...는 간단하게 덮어쓰기 or 이름변경 (여기선 일단 복사만)
+    const destPath = path.join(settings.copyDestination, fileToCopy);
+
+    // 파일명 중복 처리...는 간단하게 덮어쓰기 or 이름변경 (여기선 복사)
     try {
         fs.copyFileSync(srcPath, destPath);
-        mainWindow.webContents.send('copy-success', { fileName: currentImages[currentIndex] });
+        log(`Image copied successfully to: ${destPath}`);
+        mainWindow.webContents.send('copy-success', { fileName: fileToCopy });
+        return true;
     } catch (err) {
+        log(`Failed to copy image: ${err.message}`);
         mainWindow.webContents.send('error', '이미지 복사 실패: ' + err.message);
+        return false;
     }
 }
 
@@ -839,9 +895,11 @@ async function deleteCurrentFolder() {
                 nextFolder = candidates[randIdx];
             }
         } else {
+            const sortedFolders = getSortedSiblingFolders(settings.folderNavigation);
+            const currentFolderIndex = sortedFolders.indexOf(targetFolder);
             let nextIdx = currentFolderIndex + 1;
-            if (nextIdx >= siblingFolders.length) nextIdx = 0; // 루프
-            nextFolder = siblingFolders[nextIdx];
+            if (nextIdx >= sortedFolders.length) nextIdx = 0; // 루프
+            nextFolder = sortedFolders[nextIdx];
         }
     }
 
@@ -849,12 +907,13 @@ async function deleteCurrentFolder() {
         log(`[deleteCurrentFolder] Moving view to: ${nextFolder}`);
         loadFolder(nextFolder);
         // UI 업데이트
+        const sortedFolders = getSortedSiblingFolders(settings.folderNavigation);
         mainWindow.webContents.send('folder-changed', {
             folderName: path.basename(nextFolder),
             direction: 'next',
             folderNavigation: settings.folderNavigation,
-            currentFolderIndex: siblingFolders.indexOf(nextFolder) + 1,
-            totalFolders: siblingFolders.length
+            currentFolderIndex: sortedFolders.indexOf(nextFolder) + 1,
+            totalFolders: sortedFolders.length
         });
     } else {
         log('[deleteCurrentFolder] No more folders to move to.');

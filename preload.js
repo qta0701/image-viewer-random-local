@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('api', {
     getSettings: () => ipcRenderer.invoke('get-settings'),
     saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
 
-    copyImage: () => ipcRenderer.invoke('copy-image'),
+    copyImage: (targetPath) => ipcRenderer.invoke('copy-image', targetPath),
     requestDelete: () => ipcRenderer.send('request-delete'),
     executeDelete: () => ipcRenderer.send('execute-delete'),
     selectCopyDestination: () => ipcRenderer.invoke('select-copy-destination'),
