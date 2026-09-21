@@ -107,6 +107,37 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('save-settings').addEventListener('click', saveSettings);
         document.querySelector('.modal-backdrop').addEventListener('click', closeSettings);
 
+        const folderRangePrevInput = document.getElementById('folder-range-prev-count');
+        const folderRangeNextInput = document.getElementById('folder-range-next-count');
+        const folderOlderInput = document.getElementById('folder-older-count');
+        const folderNewerInput = document.getElementById('folder-newer-count');
+
+        function saveRangeInputsImmediately() {
+            const prevRangeVal = folderRangePrevInput ? (Math.max(1, parseInt(folderRangePrevInput.value, 10) || 5)) : 5;
+            const nextRangeVal = folderRangeNextInput ? (Math.max(1, parseInt(folderRangeNextInput.value, 10) || 5)) : 5;
+            const olderVal = folderOlderInput ? (Math.max(1, parseInt(folderOlderInput.value, 10) || 5)) : 5;
+            const newerVal = folderNewerInput ? (Math.max(1, parseInt(folderNewerInput.value, 10) || 5)) : 5;
+
+            settings.folderRangePrevCount = prevRangeVal;
+            settings.folderRangeNextCount = nextRangeVal;
+            settings.folderOlderCount = olderVal;
+            settings.folderNewerCount = newerVal;
+
+            window.api.saveSettings({
+                folderRangePrevCount: prevRangeVal,
+                folderRangeNextCount: nextRangeVal,
+                folderOlderCount: olderVal,
+                folderNewerCount: newerVal
+            });
+        }
+
+        [folderRangePrevInput, folderRangeNextInput, folderOlderInput, folderNewerInput].forEach(el => {
+            if (el) {
+                el.addEventListener('input', saveRangeInputsImmediately);
+                el.addEventListener('change', saveRangeInputsImmediately);
+            }
+        });
+
         document.getElementById('select-copy-dest').addEventListener('click', async () => {
             const newPath = await window.api.selectCopyDestination();
             if (newPath) document.getElementById('copy-dest-path').textContent = newPath;
@@ -695,9 +726,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             'sequential': '순차폴더',
             'random': '랜덤폴더',
             'randomRangeDate': '날짜범위랜덤',
-            'randomRecentDate': '최신범위랜덤',
-            'dateDesc': '날짜내림순',
-            'dateAsc': '날짜오름순',
+            'randomRecentDate': '과거방향랜덤',
+            'randomOldestDate': '최신방향랜덤',
+            'dateDesc': '날짜내림(과거)',
+            'dateAsc': '날짜오름(최신)',
             'loop': '폴더순환',
             'none': '폴더순환'
         };
@@ -718,9 +750,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             'sequential': '순차',
             'random': '랜덤',
             'randomRangeDate': '날짜범위랜덤',
-            'randomRecentDate': '최신범위랜덤',
-            'dateDesc': '날짜내림',
-            'dateAsc': '날짜오름',
+            'randomRecentDate': '과거방향랜덤',
+            'randomOldestDate': '최신방향랜덤',
+            'dateDesc': '날짜내림(과거)',
+            'dateAsc': '날짜오름(최신)',
             'loop': '순환',
             'none': '순환'
         };
@@ -1043,13 +1076,42 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (files.length > 0) window.api.dropFiles(files);
     }
 
-    function openSettings() {
+    async function openSettings() {
         window.api.log('[Renderer] openSettings called (F5).');
+        try {
+            const latest = await window.api.getSettings();
+            if (latest) settings = latest;
+        } catch (e) {
+            console.error('Failed to get latest settings on openSettings:', e);
+        }
         updateSettingsUI();
         settingsModal.classList.remove('hidden');
     }
 
     function closeSettings() {
+        const folderRangePrevEl = document.getElementById('folder-range-prev-count');
+        const folderRangeNextEl = document.getElementById('folder-range-next-count');
+        const folderOlderEl = document.getElementById('folder-older-count');
+        const folderNewerEl = document.getElementById('folder-newer-count');
+
+        if (folderRangePrevEl && folderRangeNextEl) {
+            const prevVal = Math.max(1, parseInt(folderRangePrevEl.value, 10) || 5);
+            const nextVal = Math.max(1, parseInt(folderRangeNextEl.value, 10) || 5);
+            const olderVal = folderOlderEl ? (Math.max(1, parseInt(folderOlderEl.value, 10) || 5)) : 5;
+            const newerVal = folderNewerEl ? (Math.max(1, parseInt(folderNewerEl.value, 10) || 5)) : 5;
+
+            settings.folderRangePrevCount = prevVal;
+            settings.folderRangeNextCount = nextVal;
+            settings.folderOlderCount = olderVal;
+            settings.folderNewerCount = newerVal;
+
+            window.api.saveSettings({
+                folderRangePrevCount: prevVal,
+                folderRangeNextCount: nextVal,
+                folderOlderCount: olderVal,
+                folderNewerCount: newerVal
+            });
+        }
         settingsModal.classList.add('hidden');
     }
 
@@ -1060,11 +1122,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         const folderNavRadio = document.querySelector(`input[name="folderNav"][value="${folderNavVal}"]`);
         if (folderNavRadio) folderNavRadio.checked = true;
 
-        const folderRangeInput = document.getElementById('folder-range-count');
-        if (folderRangeInput) folderRangeInput.value = settings.folderRangeCount || 5;
+        const folderRangePrevInput = document.getElementById('folder-range-prev-count');
+        if (folderRangePrevInput) folderRangePrevInput.value = settings.folderRangePrevCount || settings.folderRangeCount || 5;
 
-        const folderRecentInput = document.getElementById('folder-recent-count');
-        if (folderRecentInput) folderRecentInput.value = settings.folderRecentCount || 5;
+        const folderRangeNextInput = document.getElementById('folder-range-next-count');
+        if (folderRangeNextInput) folderRangeNextInput.value = settings.folderRangeNextCount || settings.folderRangeCount || 5;
+
+        const folderOlderInput = document.getElementById('folder-older-count');
+        if (folderOlderInput) folderOlderInput.value = settings.folderOlderCount || settings.folderRecentCount || 5;
+
+        const folderNewerInput = document.getElementById('folder-newer-count');
+        if (folderNewerInput) folderNewerInput.value = settings.folderNewerCount || settings.folderRecentCount || 5;
 
         const imageNavRadio = document.querySelector(`input[name="imageNav"][value="${settings.imageNavigation}"]`);
         if (imageNavRadio) imageNavRadio.checked = true;
@@ -1114,13 +1182,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             const wheelActionEl = document.querySelector('input[name="wheelAction"]:checked');
             const keyboardActionEl = document.querySelector('input[name="keyboardAction"]:checked');
 
-            const folderRangeEl = document.getElementById('folder-range-count');
-            const folderRecentEl = document.getElementById('folder-recent-count');
+            const folderRangePrevEl = document.getElementById('folder-range-prev-count');
+            const folderRangeNextEl = document.getElementById('folder-range-next-count');
+            const folderOlderEl = document.getElementById('folder-older-count');
+            const folderNewerEl = document.getElementById('folder-newer-count');
 
             const newSettings = {
                 folderNavigation: folderNavEl ? folderNavEl.value : settings.folderNavigation,
-                folderRangeCount: folderRangeEl ? (parseInt(folderRangeEl.value, 10) || 5) : 5,
-                folderRecentCount: folderRecentEl ? (parseInt(folderRecentEl.value, 10) || 5) : 5,
+                folderRangePrevCount: folderRangePrevEl ? (parseInt(folderRangePrevEl.value, 10) || 5) : 5,
+                folderRangeNextCount: folderRangeNextEl ? (parseInt(folderRangeNextEl.value, 10) || 5) : 5,
+                folderOlderCount: folderOlderEl ? (parseInt(folderOlderEl.value, 10) || 5) : 5,
+                folderNewerCount: folderNewerEl ? (parseInt(folderNewerEl.value, 10) || 5) : 5,
                 imageNavigation: imageNavEl ? imageNavEl.value : settings.imageNavigation,
                 viewMode: viewModeEl ? viewModeEl.value : settings.viewMode,
                 enableImageDrag: imageDragEl ? imageDragEl.checked : settings.enableImageDrag,

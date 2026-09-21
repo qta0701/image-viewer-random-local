@@ -17,6 +17,10 @@ let visitedImages = new Set();
 let visitedFolders = new Set();
 let historyStack = []; // 방문 기록 스택
 
+function normPath(p) {
+    return p ? path.normalize(p).toLowerCase() : '';
+}
+
 // 디버그 로그 파일 경로
 const logPath = path.join(app.getPath('userData'), 'debug.log');
 
@@ -44,13 +48,11 @@ function loadSettings() {
             if (settings.firstImageSingle === undefined) {
                 settings.firstImageSingle = false;
             }
-            if (settings.folderRangeCount === undefined) {
-                settings.folderRangeCount = 5;
-            }
-            if (settings.folderRecentCount === undefined) {
-                settings.folderRecentCount = 5;
-            }
-            log('Settings loaded successfully');
+            settings.folderRangePrevCount = Math.max(1, parseInt(settings.folderRangePrevCount, 10) || parseInt(settings.folderRangeCount, 10) || 5);
+            settings.folderRangeNextCount = Math.max(1, parseInt(settings.folderRangeNextCount, 10) || parseInt(settings.folderRangeCount, 10) || 5);
+            settings.folderOlderCount = Math.max(1, parseInt(settings.folderOlderCount, 10) || parseInt(settings.folderRecentCount, 10) || 5);
+            settings.folderNewerCount = Math.max(1, parseInt(settings.folderNewerCount, 10) || parseInt(settings.folderRecentCount, 10) || 5);
+            log(`Settings loaded: prevRange=${settings.folderRangePrevCount}, nextRange=${settings.folderRangeNextCount}, older=${settings.folderOlderCount}, newer=${settings.folderNewerCount}`);
         } else {
             // 기본 설정
             settings = {
@@ -66,8 +68,10 @@ function loadSettings() {
                 firstImageSingle: false,
                 wheelAction: 'prevNext', // 'prevNext', 'firstLast'
                 keyboardAction: 'prevNext', // 'prevNext', 'firstLast'
-                folderRangeCount: 5,
-                folderRecentCount: 5,
+                folderRangePrevCount: 5,
+                folderRangeNextCount: 5,
+                folderOlderCount: 5,
+                folderNewerCount: 5,
             };
             log('Default settings loaded');
         }
@@ -78,9 +82,27 @@ function loadSettings() {
 }
 
 function saveSettings(newSettings) {
-    settings = { ...settings, ...newSettings };
-    fs.writeFileSync(savedPath, JSON.stringify(settings, null, 2));
-    log('Settings saved');
+    if (newSettings) {
+        if (newSettings.folderRangePrevCount !== undefined) {
+            newSettings.folderRangePrevCount = Math.max(1, parseInt(newSettings.folderRangePrevCount, 10) || 5);
+        }
+        if (newSettings.folderRangeNextCount !== undefined) {
+            newSettings.folderRangeNextCount = Math.max(1, parseInt(newSettings.folderRangeNextCount, 10) || 5);
+        }
+        if (newSettings.folderOlderCount !== undefined) {
+            newSettings.folderOlderCount = Math.max(1, parseInt(newSettings.folderOlderCount, 10) || 5);
+        }
+        if (newSettings.folderNewerCount !== undefined) {
+            newSettings.folderNewerCount = Math.max(1, parseInt(newSettings.folderNewerCount, 10) || 5);
+        }
+        settings = { ...settings, ...newSettings };
+    }
+    try {
+        fs.writeFileSync(savedPath, JSON.stringify(settings, null, 2));
+        log(`Settings saved: prevRange=${settings.folderRangePrevCount}, nextRange=${settings.folderRangeNextCount}, older=${settings.folderOlderCount}, newer=${settings.folderNewerCount}`);
+    } catch (err) {
+        console.error('Failed to write settings:', err);
+    }
     // 설정 변경 시 반영
     if (mainWindow) {
         mainWindow.webContents.send('settings-updated', settings);
@@ -412,7 +434,7 @@ ipcMain.on('navigate-folder', (event, direction) => {
 
 // 설정 토글 (배지 클릭 / 단축키)
 ipcMain.on('toggle-folder-nav', () => {
-    const modes = ['next', 'random', 'randomRangeDate', 'randomRecentDate', 'dateDesc', 'dateAsc', 'loop'];
+    const modes = ['next', 'random', 'randomRangeDate', 'randomRecentDate', 'randomOldestDate', 'dateDesc', 'dateAsc', 'loop'];
     let currentNav = settings.folderNavigation;
     if (currentNav === 'sequential') currentNav = 'next';
     else if (currentNav === 'none') currentNav = 'loop';
@@ -527,7 +549,7 @@ function loadFolder(folderPath, pushHistory = true) {
 
     // 중복 폴더 방문 방지 (설정에 따름)
     if (settings.preventDuplicateFolder) {
-        visitedFolders.add(folderPath);
+        visitedFolders.add(normPath(folderPath));
     }
 
     currentFolder = folderPath;
@@ -585,7 +607,10 @@ function getSortedSiblingFolders(mode = settings.folderNavigation) {
     if (!siblingFolders || siblingFolders.length === 0) return [];
     const folders = [...siblingFolders];
 
-    if (mode === 'dateDesc' || mode === 'dateAsc') {
+    const isDateDesc = mode === 'dateDesc' || mode === 'randomRangeDate' || mode === 'randomRecentDate';
+    const isDateAsc = mode === 'dateAsc' || mode === 'randomOldestDate';
+
+    if (isDateDesc || isDateAsc) {
         const statsMap = new Map();
         for (const f of folders) {
             try {
@@ -600,7 +625,7 @@ function getSortedSiblingFolders(mode = settings.folderNavigation) {
             const timeA = statsMap.get(a) || 0;
             const timeB = statsMap.get(b) || 0;
             if (timeA !== timeB) {
-                return mode === 'dateDesc' ? timeB - timeA : timeA - timeB;
+                return isDateDesc ? timeB - timeA : timeA - timeB;
             }
             return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
         });
@@ -686,9 +711,9 @@ function goToRandomFolder(direction = 1) { // direction은 랜덤에선 의미 �
     let candidates = siblingFolders;
 
     if (settings.preventDuplicateFolder) {
-        candidates = candidates.filter(f => !visitedFolders.has(f));
+        candidates = candidates.filter(f => !visitedFolders.has(normPath(f)));
         if (candidates.length === 0) {
-            // 모든 폴더 방문 -> 리셋?
+            // 모든 폴더 방문 -> 리셋
             visitedFolders.clear();
             candidates = siblingFolders;
             mainWindow.webContents.send('no-more-folders');
@@ -719,24 +744,32 @@ function goToImage(index) {
 function goToRandomRangeDateFolder() {
     if (siblingFolders.length === 0) return;
     const sorted = getSortedSiblingFolders('dateDesc');
-    let curIdx = sorted.indexOf(currentFolder);
+    const normCurrent = normPath(currentFolder);
+    let curIdx = sorted.findIndex(f => normPath(f) === normCurrent);
     if (curIdx === -1) curIdx = 0;
-    const range = Math.max(1, parseInt(settings.folderRangeCount, 10) || 5);
-    const minIdx = Math.max(0, curIdx - range);
-    const maxIdx = Math.min(sorted.length - 1, curIdx + range);
-    let candidates = sorted.slice(minIdx, maxIdx + 1);
-    if (candidates.length > 1) {
-        candidates = candidates.filter(f => f !== currentFolder);
+
+    const prevRange = Math.max(1, parseInt(settings.folderRangePrevCount, 10) || parseInt(settings.folderRangeCount, 10) || 5);
+    const nextRange = Math.max(1, parseInt(settings.folderRangeNextCount, 10) || parseInt(settings.folderRangeCount, 10) || 5);
+
+    // 현재 폴더 기준 이전 폴더 (더 최신, 오름차순 방향) 최대 prevRange개
+    const newerFolders = curIdx > 0 ? sorted.slice(Math.max(0, curIdx - prevRange), curIdx) : [];
+    // 현재 폴더 기준 다음 폴더 (더 과거, 내림차순 방향) 최대 nextRange개
+    const olderFolders = curIdx < sorted.length - 1 ? sorted.slice(curIdx + 1, Math.min(sorted.length, curIdx + 1 + nextRange)) : [];
+
+    let candidates = [...newerFolders, ...olderFolders];
+    if (candidates.length === 0) {
+        candidates = sorted.filter(f => normPath(f) !== normCurrent);
+        if (candidates.length === 0) return;
     }
+
     if (settings.preventDuplicateFolder) {
-        const nonVisited = candidates.filter(f => !visitedFolders.has(f));
+        const nonVisited = candidates.filter(f => !visitedFolders.has(normPath(f)));
         if (nonVisited.length > 0) {
             candidates = nonVisited;
         } else {
-            // 해당 범위 내의 모든 폴더를 이미 방문한 경우:
-            // 이 후보군 폴더들의 방문 기록을 리셋하여 범위 내 재탐색 가능하게 처리
-            candidates.forEach(f => visitedFolders.delete(f));
-            const reFiltered = candidates.filter(f => f !== currentFolder);
+            // 해당 범위 내 모든 폴더를 이미 방문한 경우: 이 후보군들의 방문 기록을 리셋하여 재순환 가능하게 처리
+            candidates.forEach(f => visitedFolders.delete(normPath(f)));
+            const reFiltered = candidates.filter(f => normPath(f) !== normCurrent);
             if (reFiltered.length > 0) candidates = reFiltered;
         }
     }
@@ -752,23 +785,35 @@ function goToRandomRangeDateFolder() {
     });
 }
 
+// 최신 날짜 내림차순 범위 랜덤 이동 (과거방향)
 function goToRandomRecentDateFolder() {
     if (siblingFolders.length === 0) return;
-    const sorted = getSortedSiblingFolders('dateDesc');
-    const count = Math.max(1, parseInt(settings.folderRecentCount, 10) || 5);
-    let candidates = sorted.slice(0, count);
-    if (candidates.length > 1) {
-        candidates = candidates.filter(f => f !== currentFolder);
+    const sorted = getSortedSiblingFolders('dateDesc'); // 최신순 (인덱스가 커질수록 과거)
+    const normCurrent = normPath(currentFolder);
+    let curIdx = sorted.findIndex(f => normPath(f) === normCurrent);
+    if (curIdx === -1) curIdx = 0;
+
+    const count = Math.max(1, parseInt(settings.folderOlderCount || settings.folderRecentCount, 10) || 5);
+
+    // 현재 폴더 기준 과거 방향(인덱스 큰 쪽) 최대 count개
+    let candidates = curIdx < sorted.length - 1 ? sorted.slice(curIdx + 1, Math.min(sorted.length, curIdx + 1 + count)) : [];
+    if (candidates.length === 0) {
+        // 끝에 도달한 경우 처음 최신순으로 순환
+        candidates = sorted.slice(0, count).filter(f => normPath(f) !== normCurrent);
     }
+    if (candidates.length === 0) {
+        candidates = sorted.filter(f => normPath(f) !== normCurrent);
+        if (candidates.length === 0) return;
+    }
+
     if (settings.preventDuplicateFolder) {
-        const nonVisited = candidates.filter(f => !visitedFolders.has(f));
+        const nonVisited = candidates.filter(f => !visitedFolders.has(normPath(f)));
         if (nonVisited.length > 0) {
             candidates = nonVisited;
         } else {
-            // 상위 N개 폴더를 모두 방문한 경우:
-            // 이 후보군 폴더들의 방문 기록을 리셋하여 재탐색 가능하게 처리
-            candidates.forEach(f => visitedFolders.delete(f));
-            const reFiltered = candidates.filter(f => f !== currentFolder);
+            // 과거 방향 N개 폴더를 모두 방문한 경우 리셋
+            candidates.forEach(f => visitedFolders.delete(normPath(f)));
+            const reFiltered = candidates.filter(f => normPath(f) !== normCurrent);
             if (reFiltered.length > 0) candidates = reFiltered;
         }
     }
@@ -784,13 +829,57 @@ function goToRandomRecentDateFolder() {
     });
 }
 
+// 최신날짜 오름차순 범위 랜덤 이동 (최신방향)
+function goToRandomOldestDateFolder() {
+    if (siblingFolders.length === 0) return;
+    const sorted = getSortedSiblingFolders('dateDesc'); // 최신순 (인덱스가 작을수록 최신)
+    const normCurrent = normPath(currentFolder);
+    let curIdx = sorted.findIndex(f => normPath(f) === normCurrent);
+    if (curIdx === -1) curIdx = 0;
+
+    const count = Math.max(1, parseInt(settings.folderNewerCount || settings.folderRecentCount, 10) || 5);
+
+    // 현재 폴더 기준 최신 방향(인덱스 작은 쪽) 최대 count개
+    let candidates = curIdx > 0 ? sorted.slice(Math.max(0, curIdx - count), curIdx) : [];
+    if (candidates.length === 0) {
+        // 최신 맨 앞에 도달한 경우 가장 과거순 끝으로 순환
+        candidates = sorted.slice(Math.max(0, sorted.length - count)).filter(f => normPath(f) !== normCurrent);
+    }
+    if (candidates.length === 0) {
+        candidates = sorted.filter(f => normPath(f) !== normCurrent);
+        if (candidates.length === 0) return;
+    }
+
+    if (settings.preventDuplicateFolder) {
+        const nonVisited = candidates.filter(f => !visitedFolders.has(normPath(f)));
+        if (nonVisited.length > 0) {
+            candidates = nonVisited;
+        } else {
+            // 최신 방향 N개 폴더를 모두 방문한 경우 리셋
+            candidates.forEach(f => visitedFolders.delete(normPath(f)));
+            const reFiltered = candidates.filter(f => normPath(f) !== normCurrent);
+            if (reFiltered.length > 0) candidates = reFiltered;
+        }
+    }
+    const randIdx = Math.floor(Math.random() * candidates.length);
+    const target = candidates[randIdx];
+    loadFolder(target);
+    mainWindow.webContents.send('folder-changed', {
+        folderName: path.basename(target),
+        direction: 'next',
+        folderNavigation: 'randomOldestDate',
+        currentFolderIndex: sorted.indexOf(target) + 1,
+        totalFolders: sorted.length
+    });
+}
+
 function navigateFolder(direction) {
     if (settings.folderNavigation === 'loop' || settings.folderNavigation === 'none') {
         mainWindow.webContents.send('no-more-folders');
         return;
     }
 
-    const isRandomFamily = ['random', 'randomRangeDate', 'randomRecentDate'].includes(settings.folderNavigation);
+    const isRandomFamily = ['random', 'randomRangeDate', 'randomRecentDate', 'randomOldestDate'].includes(settings.folderNavigation);
 
     if (isRandomFamily) {
         if (direction < 0) {
@@ -821,6 +910,8 @@ function navigateFolder(direction) {
                 goToRandomRangeDateFolder();
             } else if (settings.folderNavigation === 'randomRecentDate') {
                 goToRandomRecentDateFolder();
+            } else if (settings.folderNavigation === 'randomOldestDate') {
+                goToRandomOldestDateFolder();
             } else {
                 goToRandomFolder(direction);
             }
@@ -966,7 +1057,7 @@ async function deleteCurrentFolder() {
 
     let nextFolder = null;
     if (siblingFolders.length > 0) {
-        if (['random', 'randomRangeDate', 'randomRecentDate'].includes(settings.folderNavigation)) {
+        if (['random', 'randomRangeDate', 'randomRecentDate', 'randomOldestDate'].includes(settings.folderNavigation)) {
             const candidates = siblingFolders.filter(f => f !== targetFolder);
             if (candidates.length > 0) {
                 const randIdx = Math.floor(Math.random() * candidates.length);
@@ -1068,7 +1159,7 @@ async function deleteCurrentImage() {
 }
 
 function onFolderDeleteSuccess(folderPath, folderName, alreadyNavigated = false) {
-    visitedFolders.delete(folderPath);
+    visitedFolders.delete(normPath(folderPath));
     const folderIdx = siblingFolders.indexOf(folderPath);
     if (folderIdx !== -1) siblingFolders.splice(folderIdx, 1);
 
