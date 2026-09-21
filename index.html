@@ -254,6 +254,76 @@
             </div>
         </div>
 
+        <!-- 폴더 이동 옵션 선택 모달 -->
+        <div id="folder-nav-modal" class="modal hidden">
+            <div class="modal-backdrop" id="folder-nav-backdrop"></div>
+            <div class="modal-content folder-nav-modal-content">
+                <div class="modal-header">
+                    <h2>📁 폴더 이동 옵션 선택</h2>
+                    <button id="close-folder-nav-modal" class="close-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="settings-desc">원하는 폴더 이동 방식을 선택하세요.</p>
+                    <div class="nav-select-list">
+                        <button type="button" class="nav-select-btn" data-nav="next">
+                            <div class="nav-btn-icon">📄</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">순차 폴더 이동 (이름순)</div>
+                                <div class="nav-btn-desc">파일명/폴더명 가나다순으로 차례대로 이동</div>
+                            </div>
+                        </button>
+                        <button type="button" class="nav-select-btn" data-nav="random">
+                            <div class="nav-btn-icon">🎲</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">랜덤 폴더 이동 (전체)</div>
+                                <div class="nav-btn-desc">형제 폴더 전체 중에서 무작위로 선택하여 이동</div>
+                            </div>
+                        </button>
+                        <button type="button" class="nav-select-btn" data-nav="randomRangeDate">
+                            <div class="nav-btn-icon">↔️</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">날짜 기준 앞뒤 범위 랜덤 이동</div>
+                                <div class="nav-btn-desc">현재 폴더 저장날짜 기준 앞뒤 지정 개수 이내에서 무작위 이동</div>
+                            </div>
+                        </button>
+                        <button type="button" class="nav-select-btn" data-nav="randomRecentDate">
+                            <div class="nav-btn-icon">⏱️</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">최신 날짜 내림차순 범위 랜덤 이동</div>
+                                <div class="nav-btn-desc">가장 최근 저장된 폴더 상위 지정 개수 이내에서 무작위 이동</div>
+                            </div>
+                        </button>
+                        <button type="button" class="nav-select-btn" data-nav="dateDesc">
+                            <div class="nav-btn-icon">⬇️</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">날짜 내림차순 순차 이동 (최신순 전체)</div>
+                                <div class="nav-btn-desc">최근 저장된 최신 폴더부터 과거 순으로 순차 이동</div>
+                            </div>
+                        </button>
+                        <button type="button" class="nav-select-btn" data-nav="dateAsc">
+                            <div class="nav-btn-icon">⬆️</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">날짜 오름차순 순차 이동 (과거순 전체)</div>
+                                <div class="nav-btn-desc">가장 오래된 과거 폴더부터 최신 순으로 순차 이동</div>
+                            </div>
+                        </button>
+                        <button type="button" class="nav-select-btn" data-nav="loop">
+                            <div class="nav-btn-icon">🔄</div>
+                            <div class="nav-btn-info">
+                                <div class="nav-btn-title">폴더 이동 없음 (순환)</div>
+                                <div class="nav-btn-desc">경계 도달 시 다른 폴더로 가지 않고 현재 폴더 내에서 순환</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 설정 모달 -->
         <div id="settings-modal" class="modal hidden">
             <div class="modal-backdrop"></div>
@@ -283,6 +353,20 @@
                                 <div class="radio-content"><span class="radio-label">랜덤 폴더 이동</span><span
                                         class="radio-desc">형제 폴더 중 무작위 선택</span></div>
                             </label>
+                            <label class="radio-item"><input type="radio" name="folderNav" value="randomRangeDate"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-label">날짜 기준 앞뒤 범위 랜덤 이동</span>
+                                    <span class="radio-desc">현재 폴더 저장날짜 기준 앞뒤 범위 내 무작위 이동 (설정 개수 적용)</span>
+                                </div>
+                            </label>
+                            <label class="radio-item"><input type="radio" name="folderNav" value="randomRecentDate"><span
+                                    class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-label">최신 날짜 내림차순 범위 랜덤 이동</span>
+                                    <span class="radio-desc">최신 저장 폴더 상위 범위 내 무작위 이동 (설정 개수 적용)</span>
+                                </div>
+                            </label>
                             <label class="radio-item"><input type="radio" name="folderNav" value="dateDesc"><span
                                     class="radio-custom"></span>
                                 <div class="radio-content"><span class="radio-label">날짜 내림차순 폴더 이동 (최신순)</span><span
@@ -298,6 +382,38 @@
                                 <div class="radio-content"><span class="radio-label">폴더 이동 없음 (순환)</span><span
                                         class="radio-desc">현재 폴더 내에서 처음/마지막으로 순환</span></div>
                             </label>
+                        </div>
+                    </div>
+                    <div class="settings-section range-settings-section">
+                        <h3>🎯 랜덤 이동 범위 개수 설정</h3>
+                        <p class="settings-desc">날짜 기준 앞뒤 범위 및 최신순 범위 랜덤 이동 시 대상 폴더 개수를 설정합니다. (기본값: 각 5개)</p>
+                        <div class="range-settings-grid">
+                            <div class="range-setting-card">
+                                <div class="range-setting-info">
+                                    <span class="range-setting-icon">↔️</span>
+                                    <div>
+                                        <div class="range-setting-title">앞뒤 범위 개수</div>
+                                        <div class="range-setting-desc">현재 폴더 기준 앞뒤 N개 이내 무작위 탐색</div>
+                                    </div>
+                                </div>
+                                <div class="range-setting-input-box">
+                                    <input type="number" id="folder-range-count" min="1" max="999" value="5" class="styled-range-input">
+                                    <span class="range-unit-tag">개</span>
+                                </div>
+                            </div>
+                            <div class="range-setting-card">
+                                <div class="range-setting-info">
+                                    <span class="range-setting-icon">⏱️</span>
+                                    <div>
+                                        <div class="range-setting-title">최신순 범위 개수</div>
+                                        <div class="range-setting-desc">최신 저장 폴더 상위 N개 이내 무작위 탐색</div>
+                                    </div>
+                                </div>
+                                <div class="range-setting-input-box">
+                                    <input type="number" id="folder-recent-count" min="1" max="999" value="5" class="styled-range-input">
+                                    <span class="range-unit-tag">개</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="settings-section">

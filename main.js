@@ -44,6 +44,12 @@ function loadSettings() {
             if (settings.firstImageSingle === undefined) {
                 settings.firstImageSingle = false;
             }
+            if (settings.folderRangeCount === undefined) {
+                settings.folderRangeCount = 5;
+            }
+            if (settings.folderRecentCount === undefined) {
+                settings.folderRecentCount = 5;
+            }
             log('Settings loaded successfully');
         } else {
             // 기본 설정
@@ -60,6 +66,8 @@ function loadSettings() {
                 firstImageSingle: false,
                 wheelAction: 'prevNext', // 'prevNext', 'firstLast'
                 keyboardAction: 'prevNext', // 'prevNext', 'firstLast'
+                folderRangeCount: 5,
+                folderRecentCount: 5,
             };
             log('Default settings loaded');
         }
@@ -201,12 +209,6 @@ if (!gotTheLock) {
 
         app.on('activate', () => {
             if (BrowserWindow.getAllWindows().length === 0) createWindow();
-        });
-
-        // F5 단축키 등록 (새로고침 방지 -> 설정창 열기)
-        globalShortcut.register('F5', () => {
-            log('F5 pressed. Opening settings.');
-            if (mainWindow) mainWindow.webContents.send('open-settings');
         });
     });
 }
@@ -408,9 +410,9 @@ ipcMain.on('navigate-folder', (event, direction) => {
     navigateFolder(direction);
 });
 
-// 설정 토글 (배지 클릭)
+// 설정 토글 (배지 클릭 / 단축키)
 ipcMain.on('toggle-folder-nav', () => {
-    const modes = ['next', 'random', 'dateDesc', 'dateAsc', 'loop'];
+    const modes = ['next', 'random', 'randomRangeDate', 'randomRecentDate', 'dateDesc', 'dateAsc', 'loop'];
     let currentNav = settings.folderNavigation;
     if (currentNav === 'sequential') currentNav = 'next';
     else if (currentNav === 'none') currentNav = 'loop';
@@ -714,13 +716,83 @@ function goToImage(index) {
     sendImageData();
 }
 
+function goToRandomRangeDateFolder() {
+    if (siblingFolders.length === 0) return;
+    const sorted = getSortedSiblingFolders('dateDesc');
+    let curIdx = sorted.indexOf(currentFolder);
+    if (curIdx === -1) curIdx = 0;
+    const range = Math.max(1, parseInt(settings.folderRangeCount, 10) || 5);
+    const minIdx = Math.max(0, curIdx - range);
+    const maxIdx = Math.min(sorted.length - 1, curIdx + range);
+    let candidates = sorted.slice(minIdx, maxIdx + 1);
+    if (candidates.length > 1) {
+        candidates = candidates.filter(f => f !== currentFolder);
+    }
+    if (settings.preventDuplicateFolder) {
+        const nonVisited = candidates.filter(f => !visitedFolders.has(f));
+        if (nonVisited.length > 0) {
+            candidates = nonVisited;
+        } else {
+            // 해당 범위 내의 모든 폴더를 이미 방문한 경우:
+            // 이 후보군 폴더들의 방문 기록을 리셋하여 범위 내 재탐색 가능하게 처리
+            candidates.forEach(f => visitedFolders.delete(f));
+            const reFiltered = candidates.filter(f => f !== currentFolder);
+            if (reFiltered.length > 0) candidates = reFiltered;
+        }
+    }
+    const randIdx = Math.floor(Math.random() * candidates.length);
+    const target = candidates[randIdx];
+    loadFolder(target);
+    mainWindow.webContents.send('folder-changed', {
+        folderName: path.basename(target),
+        direction: 'next',
+        folderNavigation: 'randomRangeDate',
+        currentFolderIndex: sorted.indexOf(target) + 1,
+        totalFolders: sorted.length
+    });
+}
+
+function goToRandomRecentDateFolder() {
+    if (siblingFolders.length === 0) return;
+    const sorted = getSortedSiblingFolders('dateDesc');
+    const count = Math.max(1, parseInt(settings.folderRecentCount, 10) || 5);
+    let candidates = sorted.slice(0, count);
+    if (candidates.length > 1) {
+        candidates = candidates.filter(f => f !== currentFolder);
+    }
+    if (settings.preventDuplicateFolder) {
+        const nonVisited = candidates.filter(f => !visitedFolders.has(f));
+        if (nonVisited.length > 0) {
+            candidates = nonVisited;
+        } else {
+            // 상위 N개 폴더를 모두 방문한 경우:
+            // 이 후보군 폴더들의 방문 기록을 리셋하여 재탐색 가능하게 처리
+            candidates.forEach(f => visitedFolders.delete(f));
+            const reFiltered = candidates.filter(f => f !== currentFolder);
+            if (reFiltered.length > 0) candidates = reFiltered;
+        }
+    }
+    const randIdx = Math.floor(Math.random() * candidates.length);
+    const target = candidates[randIdx];
+    loadFolder(target);
+    mainWindow.webContents.send('folder-changed', {
+        folderName: path.basename(target),
+        direction: 'next',
+        folderNavigation: 'randomRecentDate',
+        currentFolderIndex: sorted.indexOf(target) + 1,
+        totalFolders: sorted.length
+    });
+}
+
 function navigateFolder(direction) {
     if (settings.folderNavigation === 'loop' || settings.folderNavigation === 'none') {
         mainWindow.webContents.send('no-more-folders');
         return;
     }
 
-    if (settings.folderNavigation === 'random') {
+    const isRandomFamily = ['random', 'randomRangeDate', 'randomRecentDate'].includes(settings.folderNavigation);
+
+    if (isRandomFamily) {
         if (direction < 0) {
             // 이전 폴더 (랜덤 모드여도 이전은 히스토리 따라가야 함)
             if (historyStack.length > 1) {
@@ -731,11 +803,11 @@ function navigateFolder(direction) {
                 // 히스토리 추가 없이 로드 (이미 스택에 있으므로)
                 loadFolder(prevFolder, false);
 
-                const sortedFolders = getSortedSiblingFolders();
+                const sortedFolders = getSortedSiblingFolders(settings.folderNavigation);
                 mainWindow.webContents.send('folder-changed', {
                     folderName: path.basename(prevFolder),
                     direction: 'prev',
-                    folderNavigation: 'random', // UI 표시는 랜덤 모드 유지
+                    folderNavigation: settings.folderNavigation,
                     currentFolderIndex: sortedFolders.indexOf(prevFolder) + 1,
                     totalFolders: sortedFolders.length
                 });
@@ -744,8 +816,14 @@ function navigateFolder(direction) {
                 mainWindow.webContents.send('no-more-folders');
             }
         } else {
-            // 다음 폴더 (랜덤)
-            goToRandomFolder(direction);
+            // 다음 폴더 (랜덤 분기)
+            if (settings.folderNavigation === 'randomRangeDate') {
+                goToRandomRangeDateFolder();
+            } else if (settings.folderNavigation === 'randomRecentDate') {
+                goToRandomRecentDateFolder();
+            } else {
+                goToRandomFolder(direction);
+            }
         }
         return;
     }
@@ -888,7 +966,7 @@ async function deleteCurrentFolder() {
 
     let nextFolder = null;
     if (siblingFolders.length > 0) {
-        if (settings.folderNavigation === 'random') {
+        if (['random', 'randomRangeDate', 'randomRecentDate'].includes(settings.folderNavigation)) {
             const candidates = siblingFolders.filter(f => f !== targetFolder);
             if (candidates.length > 0) {
                 const randIdx = Math.floor(Math.random() * candidates.length);

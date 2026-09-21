@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const infoPanel = document.getElementById('info-panel');
     const contextMenu = document.getElementById('context-menu');
     const settingsModal = document.getElementById('settings-modal');
+    const folderNavModal = document.getElementById('folder-nav-modal');
     const deleteModal = document.getElementById('delete-modal');
     const folderNotification = document.getElementById('folder-notification');
     const toolbar = document.getElementById('toolbar');
@@ -82,8 +83,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('start-btn-maximize').addEventListener('click', () => window.api.windowMaximize());
         document.getElementById('start-btn-close').addEventListener('click', () => window.api.windowClose());
 
-        document.getElementById('badge-folder-nav').addEventListener('click', () => window.api.toggleFolderNav());
+        document.getElementById('badge-folder-nav').addEventListener('click', openFolderNavModal);
         document.getElementById('badge-image-nav').addEventListener('click', () => window.api.toggleImageNav());
+
+        const closeFolderNavModalBtn = document.getElementById('close-folder-nav-modal');
+        if (closeFolderNavModalBtn) closeFolderNavModalBtn.addEventListener('click', closeFolderNavModal);
+        const folderNavBackdrop = document.getElementById('folder-nav-backdrop');
+        if (folderNavBackdrop) folderNavBackdrop.addEventListener('click', closeFolderNavModal);
+
+        document.querySelectorAll('.nav-select-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const navMode = btn.dataset.nav;
+                if (navMode) {
+                    settings.folderNavigation = navMode;
+                    window.api.saveSettings(settings);
+                    closeFolderNavModal();
+                }
+            });
+        });
 
         document.getElementById('close-settings').addEventListener('click', closeSettings);
         document.getElementById('cancel-settings').addEventListener('click', closeSettings);
@@ -248,6 +265,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function handleKeydown(e) {
+        if (!document.hasFocus()) return;
+
         if (!deleteModal.classList.contains('hidden')) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -257,6 +276,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else if (e.key === 'Escape') {
                 closeDeleteModal();
             }
+            return;
+        }
+
+        if (folderNavModal && !folderNavModal.classList.contains('hidden')) {
+            if (e.key === 'Escape') closeFolderNavModal();
             return;
         }
 
@@ -647,6 +671,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         infoPanel.classList.toggle('hidden', !infoPanelVisible);
     }
 
+    function openFolderNavModal() {
+        if (!folderNavModal) return;
+        document.querySelectorAll('.nav-select-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.nav === settings.folderNavigation);
+        });
+        folderNavModal.classList.remove('hidden');
+    }
+
+    function closeFolderNavModal() {
+        if (folderNavModal) folderNavModal.classList.add('hidden');
+    }
+
     function updateStatusBadges() {
         const folderBadge = document.getElementById('badge-folder-nav');
         const imageBadge = document.getElementById('badge-image-nav');
@@ -658,6 +694,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'next': '순차폴더',
             'sequential': '순차폴더',
             'random': '랜덤폴더',
+            'randomRangeDate': '날짜범위랜덤',
+            'randomRecentDate': '최신범위랜덤',
             'dateDesc': '날짜내림순',
             'dateAsc': '날짜오름순',
             'loop': '폴더순환',
@@ -679,6 +717,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             'next': '순차',
             'sequential': '순차',
             'random': '랜덤',
+            'randomRangeDate': '날짜범위랜덤',
+            'randomRecentDate': '최신범위랜덤',
             'dateDesc': '날짜내림',
             'dateAsc': '날짜오름',
             'loop': '순환',
@@ -839,36 +879,49 @@ document.addEventListener('DOMContentLoaded', async () => {
                     showError('이미지가 아직 완전히 로딩되지 않았습니다. 잠시 후 다시 시도해 주세요.');
                     return;
                 }
-                
 
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
                 const width1 = mainImage.naturalWidth;
                 const height1 = mainImage.naturalHeight;
                 const width2 = secondImage.naturalWidth;
                 const height2 = secondImage.naturalHeight;
-                
-                canvas.width = width1 + width2;
-                canvas.height = Math.max(height1, height2);
-                
-                ctx.fillStyle = '#000000';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                if (settings.viewMode === 'dualLR') {
-                    const y1 = (canvas.height - height1) / 2;
-                    ctx.drawImage(mainImage, 0, y1, width1, height1);
-                    
-                    const y2 = (canvas.height - height2) / 2;
-                    ctx.drawImage(secondImage, width1, y2, width2, height2);
-                } else {
-                    const y2 = (canvas.height - height2) / 2;
-                    ctx.drawImage(secondImage, 0, y2, width2, height2);
-                    
-                    const y1 = (canvas.height - height1) / 2;
-                    ctx.drawImage(mainImage, width2, y1, width1, height1);
+
+                const rawTotalWidth = width1 + width2;
+                const rawMaxHeight = Math.max(height1, height2);
+
+                // 가로 최대 3840px 제한 (비율 유지)
+                let scale = 1.0;
+                if (rawTotalWidth > 3840) {
+                    scale = 3840 / rawTotalWidth;
                 }
-                
+
+                const canvasW = Math.round(rawTotalWidth * scale);
+                const canvasH = Math.round(rawMaxHeight * scale);
+
+                const canvas = document.createElement('canvas');
+                canvas.width = canvasW;
+                canvas.height = canvasH;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, canvasW, canvasH);
+
+                const scaledW1 = Math.round(width1 * scale);
+                const scaledH1 = Math.round(height1 * scale);
+                const scaledW2 = Math.round(width2 * scale);
+                const scaledH2 = Math.round(height2 * scale);
+
+                if (settings.viewMode === 'dualLR') {
+                    const y1 = (canvasH - scaledH1) / 2;
+                    ctx.drawImage(mainImage, 0, y1, scaledW1, scaledH1);
+                    const y2 = (canvasH - scaledH2) / 2;
+                    ctx.drawImage(secondImage, scaledW1, y2, scaledW2, scaledH2);
+                } else {
+                    const y2 = (canvasH - scaledH2) / 2;
+                    ctx.drawImage(secondImage, 0, y2, scaledW2, scaledH2);
+                    const y1 = (canvasH - scaledH1) / 2;
+                    ctx.drawImage(mainImage, scaledW2, y1, scaledW1, scaledH1);
+                }
+
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
                 await window.api.copyCombinedImage(dataUrl);
             } catch (err) {
@@ -876,16 +929,33 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showError('이미지 병합 복사 실패: ' + err.message);
             }
         } else {
-            // 2장 보기 모드에서 마지막 이미지(또는 첫 장)로 인해 1장만 노출되는 경우 및 단일 이미지 모드
+            // 단일 이미지 모드 또는 2장 모드에서 1장만 노출된 상태: 해상도 유지 및 용량 압축 저장
             if (!currentImageData || !currentImageData.path) {
                 showError('복사할 이미지가 없습니다.');
                 return;
             }
+
             try {
-                await window.api.copyImage(currentImageData.path);
+                if (!mainImage.complete || mainImage.naturalWidth === 0) {
+                    showError('이미지가 아직 완전히 로딩되지 않았습니다. 잠시 후 다시 시도해 주세요.');
+                    return;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = mainImage.naturalWidth;
+                canvas.height = mainImage.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(mainImage, 0, 0, canvas.width, canvas.height);
+
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                await window.api.copyCombinedImage(dataUrl);
             } catch (err) {
-                window.api.log(`[Renderer] copyImage failed: ${err.message}`);
-                showError('이미지 복사 실패: ' + err.message);
+                window.api.log(`[Renderer] Canvas copy failed, falling back to direct copy: ${err.message}`);
+                try {
+                    await window.api.copyImage(currentImageData.path);
+                } catch (err2) {
+                    showError('이미지 복사 실패: ' + err2.message);
+                }
             }
         }
     }
@@ -990,6 +1060,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const folderNavRadio = document.querySelector(`input[name="folderNav"][value="${folderNavVal}"]`);
         if (folderNavRadio) folderNavRadio.checked = true;
 
+        const folderRangeInput = document.getElementById('folder-range-count');
+        if (folderRangeInput) folderRangeInput.value = settings.folderRangeCount || 5;
+
+        const folderRecentInput = document.getElementById('folder-recent-count');
+        if (folderRecentInput) folderRecentInput.value = settings.folderRecentCount || 5;
+
         const imageNavRadio = document.querySelector(`input[name="imageNav"][value="${settings.imageNavigation}"]`);
         if (imageNavRadio) imageNavRadio.checked = true;
 
@@ -1038,8 +1114,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             const wheelActionEl = document.querySelector('input[name="wheelAction"]:checked');
             const keyboardActionEl = document.querySelector('input[name="keyboardAction"]:checked');
 
+            const folderRangeEl = document.getElementById('folder-range-count');
+            const folderRecentEl = document.getElementById('folder-recent-count');
+
             const newSettings = {
                 folderNavigation: folderNavEl ? folderNavEl.value : settings.folderNavigation,
+                folderRangeCount: folderRangeEl ? (parseInt(folderRangeEl.value, 10) || 5) : 5,
+                folderRecentCount: folderRecentEl ? (parseInt(folderRecentEl.value, 10) || 5) : 5,
                 imageNavigation: imageNavEl ? imageNavEl.value : settings.imageNavigation,
                 viewMode: viewModeEl ? viewModeEl.value : settings.viewMode,
                 enableImageDrag: imageDragEl ? imageDragEl.checked : settings.enableImageDrag,
